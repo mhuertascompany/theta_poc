@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+slurm/cluster.env        # cluster-specific paths/account — keep out of git
+/virgotng_*              # never commit real data
+*.hdf5                   # except the tiny fixtures, force-added below
+!fixtures/*.hdf5
