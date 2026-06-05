@@ -133,19 +133,22 @@ def make_figure1(hash_):
     ax.set_yscale("log")
     ax.set_title(r"Hot-phase mass loading $\eta_M$  [lead panel]")
 
-    # ── 3. f_duty (population duty cycle vs M_200c) ───────────────────────────
-    # Using logM200c (not logM_BH): many low-mass halos have BH seeds below
-    # BH_BINS range, leaving the M_BH axis empty.
+    # ── 3. f_duty (population duty cycle vs M_BH) ─────────────────────────────
+    # The mode transition tracks M_BH, not halo mass — use logM_BH per SPEC.
+    # Local bins start at 6.0 (TNG seeds at ~10^5.5, grown to ~10^6 by z=0).
     ax = axes[0, 2]
+    BHBINS_LOCAL = np.arange(6.0, 9.51, 0.25)
     for s in SUITES:
         df  = dfs[s]
         lam = df["lambda_edd_max"].fillna(0).values
-        c, frac, _ = bin_active_fraction(df["logM200c"].values, lam, MBINS,
+        c, frac, _ = bin_active_fraction(df["logM_BH"].values, lam,
+                                          BHBINS_LOCAL,
                                           C.PROTOCOL["lambda_edd_thr"])
         ok = np.isfinite(frac)
         if ok.sum() > 0:
             ax.plot(c[ok], frac[ok], color=COLORS[s], ls=LS[s],
                     lw=1.8, label=LABELS[s])
+    ax.set_xlabel(r"$\log M_{\rm BH}\ [M_\odot]$")
     ax.set_ylabel(r"$f_{\rm duty}\ (\lambda > \lambda_{\rm thr})$")
     ax.set_ylim(0, 1.05)
     ax.legend(loc="upper left", framealpha=0.8)
@@ -208,10 +211,14 @@ def make_figure1(hash_):
                       ec="lightgray", alpha=0.85))
 
     # ── shared x-label and axes tweaks ────────────────────────────────────────
-    for ax in axes.flat:
+    for i, ax in enumerate(axes.flat):
         if ax.get_xlabel() == "":
             ax.set_xlabel(r"$\log M_{200c}\ [M_\odot]$")
-        ax.set_xlim(11.4, 14.1)
+        # panel 3 (f_duty) has logM_BH x-axis — set its own limits
+        if i == 2:
+            ax.set_xlim(6.0, 9.6)
+        else:
+            ax.set_xlim(11.4, 14.1)
 
     fig.suptitle(
         r"$\theta_{\rm feedback}$ descriptors — "

@@ -1,0 +1,25 @@
+#!/bin/bash -l
+#
+# EAGLE BH_Mdot unit verification
+#
+#SBATCH -J THETA_VERIFY_UNITS
+#SBATCH -o /u/mhuertas/python/theta_poc/logs/verify_eagle_units.%j.out
+#SBATCH -e /u/mhuertas/python/theta_poc/logs/verify_eagle_units.%j.err
+#SBATCH -D /u/mhuertas/python/theta_poc
+#SBATCH -p p.vera
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=8000MB
+#SBATCH --time=00:15:00
+
+module purge
+module load anaconda/3/2023.03
+
+source /u/mhuertas/python/envs/synth/bin/activate
+
+# Run for all three suites to cross-check
+for SUITE in Eagle100-1 TNG100-1 Simba25-1; do
+    echo "========== $SUITE =========="
+    python3 verify_eagle_units.py $SUITE
+    echo ""
+done
