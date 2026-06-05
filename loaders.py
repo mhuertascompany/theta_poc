@@ -124,15 +124,25 @@ def load_halo(path, snapnum, halo_id, catalog, h, a, box_ckpch, bh_avail=None):
         a_form    = star_raw["GFM_StellarFormationTime"][real].astype(np.float64),
     )
 
-    # ── BHs (central subhalo; zero-length if no BH present) ─────────────────
-    n_bh = len(bh_raw["BH_Mass"]) if "BH_Mass" in bh_raw else 0
-    bh = dict(
-        pos    = U.comoving_to_physical(bh_raw["Coordinates"], a, h),
-        mass   = U.code_mass_to_msun(bh_raw["BH_Mass"].astype(np.float64),   h),
-        mdot   = U.bh_mdot_to_msun_yr(bh_raw["BH_Mdot"].astype(np.float64)),
-        egy_qm = bh_raw.get("BH_CumEgyInjection_QM", np.zeros(n_bh)),
-        egy_rm = bh_raw.get("BH_CumEgyInjection_RM", np.zeros(n_bh)),
-    )
+    # ── BHs (central subhalo; empty arrays if subhalo has no BH particles) ──
+    # loadSubhalo returns an empty dict {} when the subhalo has 0 PT5 particles
+    if "Coordinates" not in bh_raw or len(bh_raw.get("BH_Mass", [])) == 0:
+        bh = dict(
+            pos    = np.zeros((0, 3)),
+            mass   = np.zeros(0),
+            mdot   = np.zeros(0),
+            egy_qm = np.zeros(0),
+            egy_rm = np.zeros(0),
+        )
+    else:
+        n_bh = len(bh_raw["BH_Mass"])
+        bh = dict(
+            pos    = U.comoving_to_physical(bh_raw["Coordinates"], a, h),
+            mass   = U.code_mass_to_msun(bh_raw["BH_Mass"].astype(np.float64), h),
+            mdot   = U.bh_mdot_to_msun_yr(bh_raw["BH_Mdot"].astype(np.float64)),
+            egy_qm = bh_raw.get("BH_CumEgyInjection_QM", np.zeros(n_bh)),
+            egy_rm = bh_raw.get("BH_CumEgyInjection_RM", np.zeros(n_bh)),
+        )
 
     box_kpc = U.comoving_to_physical(box_ckpch, a, h)
 
