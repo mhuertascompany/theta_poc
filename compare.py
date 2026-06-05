@@ -133,19 +133,19 @@ def make_figure1(hash_):
     ax.set_yscale("log")
     ax.set_title(r"Hot-phase mass loading $\eta_M$  [lead panel]")
 
-    # ── 3. f_duty (population duty cycle vs M_BH) ─────────────────────────────
+    # ── 3. f_duty (population duty cycle vs M_200c) ───────────────────────────
+    # Using logM200c (not logM_BH): many low-mass halos have BH seeds below
+    # BH_BINS range, leaving the M_BH axis empty.
     ax = axes[0, 2]
     for s in SUITES:
         df  = dfs[s]
-        x   = df["logM_BH"].values
         lam = df["lambda_edd_max"].fillna(0).values
-        c, frac, _ = bin_active_fraction(x, lam, BHBINS,
+        c, frac, _ = bin_active_fraction(df["logM200c"].values, lam, MBINS,
                                           C.PROTOCOL["lambda_edd_thr"])
         ok = np.isfinite(frac)
         if ok.sum() > 0:
             ax.plot(c[ok], frac[ok], color=COLORS[s], ls=LS[s],
                     lw=1.8, label=LABELS[s])
-    ax.set_xlabel(r"$\log M_{\rm BH}\ [M_\odot]$")
     ax.set_ylabel(r"$f_{\rm duty}\ (\lambda > \lambda_{\rm thr})$")
     ax.set_ylim(0, 1.05)
     ax.legend(loc="upper left", framealpha=0.8)
