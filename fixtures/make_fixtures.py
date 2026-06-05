@@ -114,7 +114,7 @@ def write_gas_particles(f):
         np.tile([200.,   0.,    0.], (n, 1)),   # A: outflowing +x
         np.tile([  0.,  -50.,  0.], (n, 1)),   # B: inflowing  +y
         np.zeros((n, 3)),                       # C: at rest
-        np.tile([  0.,   0., -100.], (n, 1)),  # D: arbitrary
+        np.tile([  0.,   0., +100.], (n, 1)),  # D: +z vel, -z pos → v_r=-100 (inflowing)
     ]).astype(np.float32)
 
     n_tot = 4 * n
