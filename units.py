@@ -92,8 +92,11 @@ def eddington_mdot_msun_yr(M_bh_msun, eps_r):
     Eddington accretion rate [Msun/yr] for BH mass M_bh_msun [Msun].
 
     Mdot_Edd = 4π G M_BH m_p / (ε_r σ_T c)
+
+    Cast to float64: illustris_python returns float32; M_bh * _M_SUN (~1e33)
+    overflows float32 (max ~3.4e38) when M_bh > ~1e6 Msun.
     """
-    M_bh_g   = M_bh_msun * _M_SUN
+    M_bh_g   = np.asarray(M_bh_msun, dtype=np.float64) * _M_SUN
     mdot_cgs = 4.0 * np.pi * _G * M_bh_g * _M_P / (eps_r * _SIGMA_T * _C)
     return mdot_cgs * _YR / _M_SUN
 

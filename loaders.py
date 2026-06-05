@@ -128,8 +128,8 @@ def load_halo(path, snapnum, halo_id, catalog, h, a, box_ckpch, bh_avail=None):
     n_bh = len(bh_raw["BH_Mass"]) if "BH_Mass" in bh_raw else 0
     bh = dict(
         pos    = U.comoving_to_physical(bh_raw["Coordinates"], a, h),
-        mass   = U.code_mass_to_msun(bh_raw["BH_Mass"],        h),
-        mdot   = U.bh_mdot_to_msun_yr(bh_raw["BH_Mdot"]),
+        mass   = U.code_mass_to_msun(bh_raw["BH_Mass"].astype(np.float64),   h),
+        mdot   = U.bh_mdot_to_msun_yr(bh_raw["BH_Mdot"].astype(np.float64)),
         egy_qm = bh_raw.get("BH_CumEgyInjection_QM", np.zeros(n_bh)),
         egy_rm = bh_raw.get("BH_CumEgyInjection_RM", np.zeros(n_bh)),
     )
