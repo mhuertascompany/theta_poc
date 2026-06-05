@@ -58,17 +58,25 @@ def load_header(path, snapnum):
 # ── §A assertion checks ───────────────────────────────────────────────────────
 
 def check_bh_mode_logs(path, snapnum, suite_key):
-    """Load BH cumulative energy fields; assert §A expectations."""
+    """Load BH cumulative energy fields; assert §A expectations.
+
+    For SIMBA the fields may be entirely absent (not just zeroed) — both
+    outcomes mean 'no logged ground truth' and are treated identically.
+    """
     il  = _il()
     reg = R.get_suite(suite_key)
-    bhs = il.snapshot.loadSubset(
-        path, snapnum, 5,
-        fields=["BH_Mass", "BH_Mdot",
-                "BH_CumEgyInjection_QM", "BH_CumEgyInjection_RM"],
-        sq=False,
-    )
+
+    available = set(snap_field_list(path, snapnum, 5))
+    load_fields = ["BH_Mass", "BH_Mdot"] + [
+        f for f in ["BH_CumEgyInjection_QM", "BH_CumEgyInjection_RM"]
+        if f in available
+    ]
+    bhs = il.snapshot.loadSubset(path, snapnum, 5, fields=load_fields, sq=False)
+
     qm = bhs.get("BH_CumEgyInjection_QM", np.array([0.0]))
     rm = bhs.get("BH_CumEgyInjection_RM", np.array([0.0]))
+    qm_absent = "BH_CumEgyInjection_QM" not in available
+    rm_absent = "BH_CumEgyInjection_RM" not in available
     family = reg["sim_family"]
 
     if family == "TNG":
@@ -85,9 +93,12 @@ def check_bh_mode_logs(path, snapnum, suite_key):
         print(f"  [OK] EAGLE zero-kinetic anchor: QM max={qm.max():.3e}  RM≡0 confirmed")
 
     elif family == "SIMBA":
+        # Fields absent OR present-but-zero both mean no logged ground truth — either is OK.
         assert qm.max() == 0, f"SIMBA: QM should be 0 — got {qm.max():.3e}"
         assert rm.max() == 0, f"SIMBA: RM should be 0 — got {rm.max():.3e}"
-        print(f"  [OK] SIMBA: both CumEgyInjection fields confirmed zero")
+        qm_status = "absent" if qm_absent else "present but zero"
+        rm_status = "absent" if rm_absent else "present but zero"
+        print(f"  [OK] SIMBA: QM {qm_status},  RM {rm_status} — no logged ground truth")
 
     return dict(qm_max=float(qm.max()), rm_max=float(rm.max()),
                 qm_populated=(qm.max() > 0), rm_populated=(rm.max() > 0))
