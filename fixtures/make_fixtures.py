@@ -61,7 +61,7 @@ U_COLD, XE_COLD = 111.1,   0.1
 #   Recent: GFM_StellarFormationTime = 0.993  (very close to a=1, clearly < 100 Myr ago)
 #   Old:    GFM_StellarFormationTime = 0.500  (formed long ago, excluded from p★/m★)
 #   Wind:   GFM_StellarFormationTime = -1.0   (TNG wind particle, always excluded)
-A_FORM_RECENT = np.float32(0.993)
+A_FORM_RECENT = np.float32(0.994)   # lookback ~87 Myr < sf_recent_Myr=100
 A_FORM_OLD    = np.float32(0.500)
 A_FORM_WIND   = np.float32(-1.0)
 M_STAR_CODE   = 0.012   # GFM_InitialMass per star [code units] ≈ 1.77e8 Msun
@@ -86,6 +86,8 @@ def write_snapshot_header(f):
     hdr.attrs["UnitLength_in_cm"]        = 3.08568e21 # 1 kpc in cm
     hdr.attrs["UnitVelocity_in_cm_per_s"]= 1.0e5      # 1 km/s in cm/s
     hdr.attrs["NumFilesPerSnapshot"]     = 1
+    hdr.attrs["Omega0"]                  = 0.3089   # Omega_matter (TNG/Planck 2015)
+    hdr.attrs["OmegaLambda"]             = 0.6911
     # NumPart_Total filled with zeros now; updated when particles are added
     hdr.attrs["NumPart_Total"]           = np.zeros(6, dtype=np.int32)
 

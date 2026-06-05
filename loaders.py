@@ -177,6 +177,8 @@ def load_halo_from_hdf5(snap_path, groups_path, halo_id=0):
         sub_pos = U.comoving_to_physical(gf["Subhalo/SubhaloPos"][halo_id], a, h)
         sub_vel = gf["Subhalo/SubhaloVel"][halo_id].astype(np.float64)
         box_kpc = U.comoving_to_physical(float(hdr["BoxSize"]), a, h)
+        Omega_m = float(hdr.get("Omega0",      0.3089))
+        Omega_L = float(hdr.get("OmegaLambda", 0.6911))
 
         # gas
         pt0 = sf["PartType0"]
@@ -219,5 +221,6 @@ def load_halo_from_hdf5(snap_path, groups_path, halo_id=0):
         stars   = stars,
         bh      = bh,
         subhalo = dict(pos=sub_pos, vel=sub_vel, r200c=r200c, m200c=m200c),
-        meta    = dict(halo_id=halo_id, subhalo_id=0, h=h, a=a, box_kpc=box_kpc),
+        meta    = dict(halo_id=halo_id, subhalo_id=0, h=h, a=a, box_kpc=box_kpc,
+                       Omega_m=Omega_m, Omega_L=Omega_L),
     )

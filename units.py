@@ -101,3 +101,35 @@ def eddington_mdot_msun_yr(M_bh_msun, eps_r):
 def lambda_edd(M_bh_msun, mdot_msun_yr, eps_r):
     """Eddington ratio  λ = Mdot / Mdot_Edd  (dimensionless)."""
     return mdot_msun_yr / eddington_mdot_msun_yr(M_bh_msun, eps_r)
+
+
+# ── cosmological lookback time ────────────────────────────────────────────────
+
+def lookback_time_myr(a_form, a_now, h, Omega_m=0.3089, Omega_L=0.6911, n=512):
+    """
+    Lookback time [Myr] from scale factor a_now back to a_form.
+
+    Uses trapezoidal integration of the flat ΛCDM Friedmann equation:
+      t_lb = (1/H0) * ∫[a_form → a_now] da / (a * sqrt(Ωm/a³ + ΩΛ))
+
+    Supports scalar or 1-D array a_form.  Returns float for scalar input.
+    """
+    a_form = np.atleast_1d(np.asarray(a_form, dtype=np.float64))
+    a_min  = float(np.clip(a_form.min(), 1e-4, a_now))
+
+    a_grid    = np.linspace(a_min, float(a_now), n)
+    H_over_H0 = np.sqrt(Omega_m * a_grid**-3 + Omega_L)
+    integrand = 1.0 / (a_grid * H_over_H0)
+
+    # cumulative trapezoidal integral from a_min
+    cum = np.concatenate([[0.0],
+          np.cumsum(0.5 * (integrand[:-1] + integrand[1:]) * np.diff(a_grid))])
+
+    # for each a_form: t_lb = (total − integral_up_to_a_form) / H0
+    int_to_a_form = np.interp(a_form, a_grid, cum)
+    t_lb_H0inv   = cum[-1] - int_to_a_form        # dimensionless
+
+    H0_inv_myr = 1.0 / (h * 1e2 * 1e3 / 3.0857e22) / (_YR * 1e6)
+    t_lb_myr   = t_lb_H0inv * H0_inv_myr
+
+    return t_lb_myr if t_lb_myr.size > 1 else float(t_lb_myr[0])
