@@ -60,7 +60,8 @@ def main():
     separator("Selecting central galaxy")
     cat = loaders.load_catalog(path, snap, h, a)
 
-    log_m200 = np.log10(cat["m200c"])
+    with np.errstate(divide="ignore", invalid="ignore"):
+        log_m200 = np.log10(cat["m200c"])
     in_range  = (log_m200 >= C.HALO_SELECT["logM200_min"]) & \
                 (log_m200 <= C.HALO_SELECT["logM200_max"])
     print(f"  Halos in mass range [{C.HALO_SELECT['logM200_min']}, "
@@ -104,9 +105,10 @@ def main():
         halo["gas"], halo["subhalo"], halo["meta"]["box_kpc"])
 
     # velocity dispersion sanity: median |v_r| vs SubhaloVelDisp from catalog
-    vdisp_cat = float(_il().groupcat.loadSubhalos(
-        path, snap, fields=["SubhaloVelDisp"]
-    )["SubhaloVelDisp"][subhalo_id])
+    # loadSubhalos squeezes to a plain array when a single field is requested
+    _vd = _il().groupcat.loadSubhalos(path, snap, fields=["SubhaloVelDisp"])
+    vdisp_cat = float(_vd["SubhaloVelDisp"][subhalo_id]
+                      if isinstance(_vd, dict) else _vd[subhalo_id])
     vdisp_gas = float(np.std(halo["gas"]["v_r"]))
     print(f"\n  SubhaloVelDisp (catalog) : {vdisp_cat:.1f} km/s")
     print(f"  gas v_r std (halo frame) : {vdisp_gas:.1f} km/s  (rough check)")
