@@ -7,11 +7,11 @@ Usage:
 
 Runs on the cluster where /virgotng is accessible.
 illustris_python is imported lazily so the file can be imported locally.
-
-Assertions fail loudly if dataset reality contradicts SPEC §A.
+Field lists are read via h5py (no bulk data load) for speed.
 """
 
 import sys
+import h5py
 import numpy as np
 import registry as R
 
@@ -21,48 +21,54 @@ def _il():
     return il
 
 
+def _snap_file(path, snapnum):
+    return _il().snapshot.snapPath(path, snapnum)
+
+
+def _gc_file(path, snapnum):
+    return _il().groupcat.gcPath(path, snapnum)
+
+
+# ── field discovery (h5py only — no bulk load) ───────────────────────────────
+
+def snap_field_list(path, snapnum, ptype_int):
+    """Return sorted field names for PartType{ptype_int} without loading data."""
+    key = f"PartType{ptype_int}"
+    try:
+        with h5py.File(_snap_file(path, snapnum), "r") as f:
+            return sorted(f[key].keys()) if key in f else []
+    except Exception as e:
+        return [f"ERROR: {e}"]
+
+
+def gc_field_list(path, snapnum, catalog_type):
+    """Return sorted field names for Group or Subhalo catalog without loading data."""
+    try:
+        with h5py.File(_gc_file(path, snapnum), "r") as f:
+            return sorted(f[catalog_type].keys()) if catalog_type in f else []
+    except Exception as e:
+        return [f"ERROR: {e}"]
+
+
 def load_header(path, snapnum):
-    il = _il()
-    with __import__("h5py").File(il.snapPath(path, snapnum), "r") as f:
+    with h5py.File(_snap_file(path, snapnum), "r") as f:
         return dict(f["Header"].attrs)
 
 
-def field_list(path, snapnum, part_type_str):
-    """Return sorted list of field names for a particle type."""
-    il = _il()
-    try:
-        data = il.snapshot.loadSubset(path, snapnum, part_type_str,
-                                      fields=None, mdi=None, sq=False, float32=False)
-        return sorted(data.keys())
-    except Exception:
-        return []
-
-
-def group_field_list(path, snapnum, catalog_type):
-    """Return sorted list of field names from Group or Subhalo catalog."""
-    il = _il()
-    try:
-        data = il.groupcat.loadSingle(path, snapnum)
-        return sorted(data.keys())
-    except Exception:
-        try:
-            data = il.groupcat.load(path, snapnum, catalog_type)
-            return sorted(data.keys())
-        except Exception:
-            return []
-
+# ── §A assertion checks ───────────────────────────────────────────────────────
 
 def check_bh_mode_logs(path, snapnum, suite_key):
-    """Load a sample of BH particles; assert §A mode-log expectations."""
-    il = _il()
+    """Load BH cumulative energy fields; assert §A expectations."""
+    il  = _il()
     reg = R.get_suite(suite_key)
-
-    fields = ["BH_Mass", "BH_Mdot", "BH_CumEgyInjection_QM", "BH_CumEgyInjection_RM"]
-    bhs = il.snapshot.loadSubset(path, snapnum, "PartType5", fields=fields, sq=False)
-
-    qm = bhs.get("BH_CumEgyInjection_QM", np.array([]))
-    rm = bhs.get("BH_CumEgyInjection_RM", np.array([]))
-
+    bhs = il.snapshot.loadSubset(
+        path, snapnum, 5,
+        fields=["BH_Mass", "BH_Mdot",
+                "BH_CumEgyInjection_QM", "BH_CumEgyInjection_RM"],
+        sq=False,
+    )
+    qm = bhs.get("BH_CumEgyInjection_QM", np.array([0.0]))
+    rm = bhs.get("BH_CumEgyInjection_RM", np.array([0.0]))
     family = reg["sim_family"]
 
     if family == "TNG":
@@ -73,19 +79,15 @@ def check_bh_mode_logs(path, snapnum, suite_key):
     elif family == "EAGLE":
         assert qm.max() > 0, "EAGLE: BH_CumEgyInjection_QM (thermal) should be non-zero"
         assert rm.max() == 0, (
-            f"EAGLE: BH_CumEgyInjection_RM should be identically 0 — got max={rm.max():.3e}. "
+            f"EAGLE: BH_CumEgyInjection_RM must be identically 0 — got {rm.max():.3e}. "
             "Dataset version may have changed."
         )
         print(f"  [OK] EAGLE zero-kinetic anchor: QM max={qm.max():.3e}  RM≡0 confirmed")
 
     elif family == "SIMBA":
-        assert qm.max() == 0, (
-            f"SIMBA: BH_CumEgyInjection_QM should be 0 — got max={qm.max():.3e}"
-        )
-        assert rm.max() == 0, (
-            f"SIMBA: BH_CumEgyInjection_RM should be 0 — got max={rm.max():.3e}"
-        )
-        print(f"  [OK] SIMBA: both CumEgyInjection fields confirmed zero (no logged ground truth)")
+        assert qm.max() == 0, f"SIMBA: QM should be 0 — got {qm.max():.3e}"
+        assert rm.max() == 0, f"SIMBA: RM should be 0 — got {rm.max():.3e}"
+        print(f"  [OK] SIMBA: both CumEgyInjection fields confirmed zero")
 
     return dict(qm_max=float(qm.max()), rm_max=float(rm.max()),
                 qm_populated=(qm.max() > 0), rm_populated=(rm.max() > 0))
@@ -93,31 +95,32 @@ def check_bh_mode_logs(path, snapnum, suite_key):
 
 def check_wind_particles(path, snapnum, suite_key):
     """Count wind-phase PT4 particles (GFM_StellarFormationTime < 0)."""
-    il = _il()
+    il  = _il()
     reg = R.get_suite(suite_key)
     try:
-        gform = il.snapshot.loadSubset(
-            path, snapnum, "PartType4",
-            fields=["GFM_StellarFormationTime"], sq=False
-        )["GFM_StellarFormationTime"]
-    except Exception:
-        print("  [WARN] Could not load GFM_StellarFormationTime for PT4")
+        data  = il.snapshot.loadSubset(
+            path, snapnum, 4,
+            fields=["GFM_StellarFormationTime"], sq=False,
+        )
+        gform = data["GFM_StellarFormationTime"]
+    except Exception as e:
+        print(f"  [WARN] Could not load GFM_StellarFormationTime: {e}")
         return None
 
-    n_wind = (gform < 0).sum()
-    n_star = (gform > 0).sum()
+    n_wind = int((gform < 0).sum())
+    n_star = int((gform > 0).sum())
 
     if reg["sim_family"] == "TNG":
-        assert n_wind > 0, "TNG: expected wind-phase PT4 particles (GFM_StellarFormationTime < 0)"
+        assert n_wind > 0, "TNG: expected wind-phase PT4 (GFM_StellarFormationTime < 0)"
         print(f"  [OK] TNG wind PT4: {n_wind:,} wind  {n_star:,} real stars")
     else:
-        if n_wind > 0:
-            print(f"  [WARN] {suite_key}: unexpected wind PT4 particles: {n_wind:,}")
-        else:
-            print(f"  [OK] {suite_key}: no wind PT4 ({n_star:,} real stars only)")
+        tag = "[WARN]" if n_wind > 0 else "[OK]"
+        print(f"  {tag} {suite_key}: {n_wind:,} wind PT4  {n_star:,} real stars")
 
-    return dict(n_wind=int(n_wind), n_real_stars=int(n_star))
+    return dict(n_wind=n_wind, n_real_stars=n_star)
 
+
+# ── main inspector ────────────────────────────────────────────────────────────
 
 def inspect_suite(suite_key):
     reg  = R.get_suite(suite_key)
@@ -128,58 +131,59 @@ def inspect_suite(suite_key):
     print(f"  {suite_key}  (snap {snap}, z=0)")
     print(f"{'='*60}")
 
-    # ── header ────────────────────────────────────────────────────────────────
+    # header
     hdr = load_header(path, snap)
-    print(f"\nHeader:")
+    print("\nHeader:")
     for key in ["HubbleParam", "Time", "Redshift", "BoxSize",
                 "UnitMass_in_g", "UnitLength_in_cm", "UnitVelocity_in_cm_per_s"]:
         print(f"  {key}: {hdr.get(key, 'MISSING')}")
 
-    # ── particle fields ───────────────────────────────────────────────────────
-    for ptype, label in [("PartType0", "Gas"), ("PartType4", "Stars"), ("PartType5", "BHs")]:
-        fields = field_list(path, snap, ptype)
-        print(f"\n{label} ({ptype}) fields ({len(fields)}):")
+    # particle field lists
+    for ptype_int, label in [(0, "Gas"), (4, "Stars"), (5, "BHs")]:
+        fields = snap_field_list(path, snap, ptype_int)
+        print(f"\n{label} (PartType{ptype_int}) — {len(fields)} fields:")
         print("  " + "  ".join(fields))
 
-    # ── required gas fields ───────────────────────────────────────────────────
+    # group catalog field lists
+    for cat in ["Group", "Subhalo"]:
+        fields = gc_field_list(path, snap, cat)
+        print(f"\n{cat} catalog — {len(fields)} fields:")
+        print("  " + "  ".join(fields))
+
+    # required gas fields
     print("\nRequired gas field checks:")
-    gas_required = ["Coordinates", "Velocities", "Masses", "Density",
-                    "InternalEnergy", "ElectronAbundance", "StarFormationRate"]
-    gas_fields = field_list(path, snap, "PartType0")
-    for f in gas_required:
+    gas_fields = set(snap_field_list(path, snap, 0))
+    required = ["Coordinates", "Velocities", "Masses", "Density",
+                "InternalEnergy", "ElectronAbundance", "StarFormationRate"]
+    for f in required:
         status = "[OK]" if f in gas_fields else "[MISSING]"
         print(f"  {status} {f}")
     if "ElectronAbundance" not in gas_fields:
-        print("  [WARN] ElectronAbundance absent — temperature needs documented fallback μ")
+        print("  [WARN] ElectronAbundance absent — temperature needs documented fallback mu")
 
-    # ── required BH fields ────────────────────────────────────────────────────
+    # §A BH mode-log assertions
     print("\nBH mode-log checks (§A assertions):")
     mode_info = check_bh_mode_logs(path, snap, suite_key)
 
-    # ── wind particle check ───────────────────────────────────────────────────
+    # wind particle check
     print("\nWind particle check:")
     wind_info = check_wind_particles(path, snap, suite_key)
 
-    # ── SubhaloFlag ───────────────────────────────────────────────────────────
-    il = _il()
-    try:
-        sub = il.groupcat.loadSubhalos(path, snap, fields=["SubhaloFlag"])
-        has_flag = True
-        print(f"\n  SubhaloFlag: present ({len(sub):,} subhalos)")
-    except Exception:
-        has_flag = False
-        print("\n  SubhaloFlag: ABSENT — central selection must use GroupFirstSub only")
+    # SubhaloFlag
+    sub_fields = set(gc_field_list(path, snap, "Subhalo"))
+    has_flag   = "SubhaloFlag" in sub_fields
+    print(f"\nSubhaloFlag: {'present' if has_flag else 'ABSENT — use GroupFirstSub only'}")
     if reg["sim_family"] == "SIMBA":
         assert not has_flag, "SIMBA: SubhaloFlag should be absent per §A"
 
-    # ── capability table row ──────────────────────────────────────────────────
+    # capability summary
     print(f"\nCapability summary for {suite_key}:")
+    n_wind = wind_info["n_wind"] if wind_info else 0
     caps = [
-        ("mode_logs_qm",    mode_info["qm_populated"],       reg["mode_logs_qm"]),
-        ("mode_logs_rm",    mode_info["rm_populated"],        reg["mode_logs_rm"]),
-        ("has_wind_pt4",    wind_info["n_wind"] > 0 if wind_info else False,
-                                                              reg["has_wind_pt4"]),
-        ("has_subhalo_flag", has_flag,                        reg["has_subhalo_flag"]),
+        ("mode_logs_qm",     mode_info["qm_populated"],  reg["mode_logs_qm"]),
+        ("mode_logs_rm",     mode_info["rm_populated"],  reg["mode_logs_rm"]),
+        ("has_wind_pt4",     n_wind > 0,                 reg["has_wind_pt4"]),
+        ("has_subhalo_flag", has_flag,                   reg["has_subhalo_flag"]),
     ]
     all_ok = True
     for name, observed, expected in caps:
@@ -192,7 +196,7 @@ def inspect_suite(suite_key):
 
 
 def main():
-    suites = sys.argv[1:] if len(sys.argv) > 1 else list(R.PRIMARY_TRIPLET)
+    suites  = sys.argv[1:] if len(sys.argv) > 1 else list(R.PRIMARY_TRIPLET)
     results = {}
     for key in suites:
         try:
