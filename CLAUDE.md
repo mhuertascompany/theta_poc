@@ -30,6 +30,6 @@ def compute(halo: dict, cfg: dict) -> dict: ...
 
 - **TNG:** wind PT4 particles present (`GFM_StellarFormationTime < 0`); always select stars with `> 0`. Both `BH_CumEgyInjection_QM/RM` populated.
 - **EAGLE:** no wind PT4; `RM ≡ 0` (single thermal mode); 29 snapshots; h≈0.6777.
-- **SIMBA:** both `CumEgyInjection` fields zero (no logged ground truth); duplicate `ParticleIDs`; no `SubhaloFlag` → central selection via `GroupFirstSub` only; 152 snapshots (snap 126 of L50n512FP corrupt, exclude); `GFM_InitialMass` reconstructed.
+- **SIMBA:** `BH_CumEgyInjection_QM/RM` fields **absent** (not just zero) — no logged ground truth. Wind PT4 particles **are present** (`GFM_StellarFormationTime < 0`) — confirmed by inspect_fields, SPEC §A text was wrong on this point; `> 0` guard is necessary. Duplicate `ParticleIDs`; no `SubhaloFlag` → central selection via `GroupFirstSub` only; 152 snapshots (snap 126 of L50n512FP corrupt, exclude); `GFM_InitialMass` reconstructed.
 - Central selection uses `GroupFirstSub` for **all** suites (not `SubhaloFlag`, which is absent in SIMBA).
 - `validate_modes.py` runs TNG (full) + EAGLE (zero anchor) only; must assert-and-skip for SIMBA.

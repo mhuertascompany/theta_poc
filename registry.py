@@ -146,10 +146,13 @@ SUITES = {
         sim_family  = "SIMBA",
         m_gas_msun  = 2.3e6,
         box_cmpc    = 25.0,
-        # Both CumEgyInjection fields are zero — no logged mode ground truth.
+        # Both CumEgyInjection fields are ABSENT (not just zero) — no logged mode ground truth.
         mode_logs_qm              = False,
         mode_logs_rm              = False,
-        has_wind_pt4              = False,
+        # Confirmed by inspect_fields: SIMBA TNG-ization DOES encode wind particles as
+        # PT4 with GFM_StellarFormationTime < 0 (~326k wind vs ~12M real stars in Simba25-1).
+        # SPEC §A text was inaccurate; the >0 guard is necessary here just as for TNG.
+        has_wind_pt4              = True,
         has_subhalo_flag          = False,   # use GroupFirstSub for central selection
         duplicate_particle_ids    = True,
         gfm_initial_mass_reconstructed = True,
@@ -164,7 +167,7 @@ SUITES = {
         corrupt_snaps             = _SIMBA_CORRUPT_SNAPS,  # snap 126 bad
         mode_logs_qm              = False,
         mode_logs_rm              = False,
-        has_wind_pt4              = False,
+        has_wind_pt4              = True,    # confirmed; same convention as TNG
         has_subhalo_flag          = False,
         duplicate_particle_ids    = True,
         gfm_initial_mass_reconstructed = True,
@@ -178,7 +181,7 @@ SUITES = {
         box_cmpc    = 100.0,
         mode_logs_qm              = False,
         mode_logs_rm              = False,
-        has_wind_pt4              = False,
+        has_wind_pt4              = True,    # confirmed; same convention as TNG
         has_subhalo_flag          = False,
         duplicate_particle_ids    = True,
         gfm_initial_mass_reconstructed = True,
