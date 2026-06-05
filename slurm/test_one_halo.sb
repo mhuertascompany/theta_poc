@@ -1,0 +1,28 @@
+#!/bin/bash -l
+#
+# Single-galaxy end-to-end diagnostic for theta_poc — runs on VERA
+#
+#SBATCH -J THETA_TEST_HALO
+#SBATCH -o /u/mhuertas/python/theta_poc/logs/test_one_halo.%j.out
+#SBATCH -e /u/mhuertas/python/theta_poc/logs/test_one_halo.%j.err
+#SBATCH -D /u/mhuertas/python/theta_poc
+#SBATCH -p p.vera
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=32000MB
+#SBATCH --time=00:30:00
+
+module purge
+module load anaconda/3/2023.03
+
+source /u/mhuertas/python/envs/synth/bin/activate
+
+# Optional: pass suite name, e.g.
+#   sbatch test_one_halo.sb TNG100-1
+#   sbatch test_one_halo.sb Eagle100-1
+#   sbatch test_one_halo.sb Simba25-1
+# Default: TNG100-1
+
+SUITE=${1:-TNG100-1}
+echo "Running single-halo diagnostic for suite: $SUITE"
+python3 test_one_halo.py "$SUITE"
