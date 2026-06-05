@@ -1,0 +1,31 @@
+#!/bin/bash -l
+#
+# Field inspection job for theta_poc — runs inspect_fields.py on VERA
+#
+#SBATCH -J THETA_INSPECT
+#SBATCH -o /u/mhuertas/python/theta_poc/logs/inspect.%j.out
+#SBATCH -e /u/mhuertas/python/theta_poc/logs/inspect.%j.err
+#SBATCH -D /u/mhuertas/python/theta_poc
+#SBATCH -p p.vera
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=16000MB
+#SBATCH --time=00:30:00
+
+module purge
+module load anaconda/3/2023.03
+
+source /u/mhuertas/python/envs/synth/bin/activate
+
+# Optional: pass one or more suite names, e.g.
+#   sbatch inspect.sb TNG100-1
+#   sbatch inspect.sb TNG100-1 Eagle100-1 Simba25-1
+# With no argument, runs the PRIMARY_TRIPLET defined in registry.py.
+
+if [ -z "$1" ]; then
+    echo "No suite specified — running PRIMARY_TRIPLET (TNG100-1 Eagle100-1 Simba25-1)"
+    python3 inspect_fields.py
+else
+    echo "Running inspect_fields for: $@"
+    python3 inspect_fields.py "$@"
+fi
