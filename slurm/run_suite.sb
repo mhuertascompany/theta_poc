@@ -1,0 +1,33 @@
+#!/bin/bash -l
+#
+# θ_feedback descriptor run — one job per suite
+#
+#SBATCH -J THETA_RUN
+#SBATCH -o /u/mhuertas/python/theta_poc/logs/run_suite.%j.out
+#SBATCH -e /u/mhuertas/python/theta_poc/logs/run_suite.%j.err
+#SBATCH -D /u/mhuertas/python/theta_poc
+#SBATCH -p p.vera
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=32000MB
+#SBATCH --time=12:00:00
+
+module purge
+module load anaconda/3/2023.03
+
+source /u/mhuertas/python/envs/synth/bin/activate
+
+# Usage:
+#   sbatch run_suite.sb TNG100-1
+#   sbatch run_suite.sb Eagle100-1
+#   sbatch run_suite.sb Simba25-1
+#   sbatch run_suite.sb TNG100-1 --max_halos 200   # test run
+
+if [ -z "$1" ]; then
+    echo "Error: provide a suite key."
+    echo "Usage: sbatch run_suite.sb <suite_key> [--max_halos N]"
+    exit 1
+fi
+
+echo "Starting run_suite for suite: $1  args: ${@:2}"
+python3 run_suite.py "$@"
