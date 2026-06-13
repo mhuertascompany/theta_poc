@@ -421,3 +421,206 @@ def load_halo_camels(snap_path, cat_path, halo_index, gfm_reconstructed=False):
             gfm_initial_mass_reconstructed = gfm_reconstructed,
         ),
     )
+
+
+# ── CAMELS batch loader (read snapshot once, extract many halos in RAM) ──────
+#
+# load_halo_camels above re-opens the HDF5 file for every halo — fast for
+# one-off tests but slow for a full sim (256³ = ~16M particles read N times).
+# The batch path reads the snapshot ONCE into memory (~1 GB) and does all
+# sphere-masks in RAM.  Use this in run_camels.py.
+#
+# API:
+#   raw = load_snapshot_camels(snap_path, cat_path)
+#   ids = select_centrals_from_snapshot(raw, C.CAMELS_HALO_SELECT)
+#   for hid in ids:
+#       halo = extract_halo_from_snapshot(raw, hid, gfm_reconstructed)
+
+
+def load_snapshot_camels(snap_path, cat_path):
+    """
+    Read an entire CAMELS snapshot + catalog into memory in one pass.
+
+    Returns a raw_snap dict.  Pass to extract_halo_from_snapshot (no further
+    file I/O) for fast per-halo extraction.
+
+    Gas/star/BH coordinates are converted to physical kpc (needed for sphere
+    masks).  Other particle fields stay in code units and are converted in
+    extract_halo_from_snapshot after masking (avoids storing two copies of
+    large arrays).
+
+    Note: import hdf5plugin before h5py in the calling environment.
+    """
+    with h5py.File(snap_path, "r") as sf, h5py.File(cat_path, "r") as cf:
+        hdr       = dict(sf["Header"].attrs)
+        h         = float(hdr["HubbleParam"])
+        a         = float(hdr["Time"])
+        box_ckpch = float(hdr["BoxSize"])
+        Omega_m   = float(hdr.get("Omega0",      0.3))
+        Omega_L   = float(hdr.get("OmegaLambda", 0.6911))
+        box_kpc   = U.comoving_to_physical(box_ckpch, a, h)
+
+        # ── catalog (physical units) ──────────────────────────────────────────
+        m200c     = U.code_mass_to_msun(cf["Group/Group_M_Crit200"][:], h)
+        r200c     = U.comoving_to_physical(cf["Group/Group_R_Crit200"][:], a, h)
+        first_sub = cf["Group/GroupFirstSub"][:].astype(np.int64)
+        n_grp     = len(first_sub)
+        glen_type = (cf["Group/GroupLenType"][:]
+                     if "GroupLenType" in cf["Group"]
+                     else np.full((n_grp, 6), 9999, dtype=np.int64))
+        sub_pos   = U.comoving_to_physical(
+                        cf["Subhalo/SubhaloPos"][:].astype(np.float64), a, h)
+        sub_vel   = cf["Subhalo/SubhaloVel"][:].astype(np.float64)
+
+        # ── gas ── coords → physical kpc; other fields stay in code units ─────
+        gas_pos          = U.comoving_to_physical(
+                               sf["PartType0/Coordinates"][:].astype(np.float64), a, h)
+        gas_vel_code     = sf["PartType0/Velocities"][:]
+        gas_mass_code    = sf["PartType0/Masses"][:]
+        gas_density_code = sf["PartType0/Density"][:]
+        gas_u            = sf["PartType0/InternalEnergy"][:].astype(np.float64)
+        gas_xe           = sf["PartType0/ElectronAbundance"][:].astype(np.float64)
+        gas_sfr          = sf["PartType0/StarFormationRate"][:].astype(np.float64)
+
+        # ── stars ─────────────────────────────────────────────────────────────
+        pt4       = sf["PartType4"]
+        star_pos  = U.comoving_to_physical(
+                        pt4["Coordinates"][:].astype(np.float64), a, h)
+        star_gform       = pt4["GFM_StellarFormationTime"][:]
+        star_mass_code   = pt4["Masses"][:]
+        star_mass_init_code = (pt4["GFM_InitialMass"][:]
+                               if "GFM_InitialMass" in pt4 else None)
+
+        # ── BHs ───────────────────────────────────────────────────────────────
+        pt5 = sf.get("PartType5")
+        if pt5 is not None and "BH_Mass" in pt5 and len(pt5["BH_Mass"]) > 0:
+            bh_pos       = U.comoving_to_physical(
+                               pt5["Coordinates"][:].astype(np.float64), a, h)
+            bh_mass_code = pt5["BH_Mass"][:].astype(np.float64)
+            bh_mdot_code = pt5["BH_Mdot"][:].astype(np.float64)
+        else:
+            bh_pos = bh_mass_code = bh_mdot_code = None
+
+    return dict(
+        h=h, a=a, box_kpc=box_kpc, Omega_m=Omega_m, Omega_L=Omega_L,
+        # catalog
+        m200c=m200c, r200c=r200c, first_sub=first_sub, glen_type=glen_type,
+        sub_pos=sub_pos, sub_vel=sub_vel,
+        # gas
+        gas_pos=gas_pos,
+        gas_vel_code=gas_vel_code, gas_mass_code=gas_mass_code,
+        gas_density_code=gas_density_code,
+        gas_u=gas_u, gas_xe=gas_xe, gas_sfr=gas_sfr,
+        # stars
+        star_pos=star_pos, star_gform=star_gform,
+        star_mass_code=star_mass_code, star_mass_init_code=star_mass_init_code,
+        # BHs
+        bh_pos=bh_pos, bh_mass_code=bh_mass_code, bh_mdot_code=bh_mdot_code,
+    )
+
+
+def select_centrals_from_snapshot(raw_snap, sel):
+    """
+    Select central halos from a pre-loaded snapshot (no file I/O).
+
+    Same criteria as select_centrals_camels; works on raw_snap from
+    load_snapshot_camels.
+    """
+    m200c     = raw_snap["m200c"]
+    first_sub = raw_snap["first_sub"]
+    n_gas     = raw_snap["glen_type"][:, 0].astype(int)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        logm = np.log10(m200c)
+
+    mask = (
+        (first_sub >= 0) &
+        np.isfinite(logm) &
+        (logm >= sel["logM200_min"]) &
+        (logm <= sel["logM200_max"]) &
+        (n_gas >= sel["min_n_gas"])
+    )
+    return np.where(mask)[0]
+
+
+def extract_halo_from_snapshot(raw_snap, halo_index, gfm_reconstructed=False):
+    """
+    Extract one halo from pre-loaded snapshot data (no file I/O).
+
+    Performs sphere-mask in RAM against pre-converted physical coordinates.
+    Returns the same halo dict structure as load_halo_camels.
+    """
+    h       = raw_snap["h"]
+    a       = raw_snap["a"]
+    box_kpc = raw_snap["box_kpc"]
+
+    m200c     = float(raw_snap["m200c"][halo_index])
+    r200c     = float(raw_snap["r200c"][halo_index])
+    first_sub = int(raw_snap["first_sub"][halo_index])
+    sub_pos   = raw_snap["sub_pos"][first_sub].copy()
+    sub_vel   = raw_snap["sub_vel"][first_sub].copy()
+
+    # ── gas sphere mask ───────────────────────────────────────────────────────
+    dpos = raw_snap["gas_pos"] - sub_pos
+    dpos -= box_kpc * np.round(dpos / box_kpc)
+    gas_mask = np.linalg.norm(dpos, axis=1) < r200c
+
+    gas = dict(
+        pos     = raw_snap["gas_pos"][gas_mask],
+        vel     = U.code_vel_to_kms(raw_snap["gas_vel_code"][gas_mask], a),
+        mass    = U.code_mass_to_msun(raw_snap["gas_mass_code"][gas_mask], h),
+        density = U.code_density_to_msun_kpc3(
+                      raw_snap["gas_density_code"][gas_mask], a, h),
+        u       = raw_snap["gas_u"][gas_mask],
+        xe      = raw_snap["gas_xe"][gas_mask],
+        sfr     = raw_snap["gas_sfr"][gas_mask],
+    )
+
+    # ── star sphere mask, then wind filter (GFM_StellarFormationTime > 0) ────
+    sdpos = raw_snap["star_pos"] - sub_pos
+    sdpos -= box_kpc * np.round(sdpos / box_kpc)
+    star_sphere = np.linalg.norm(sdpos, axis=1) < r200c
+
+    gform      = raw_snap["star_gform"][star_sphere]
+    real_stars = gform > 0
+
+    smass_code = raw_snap["star_mass_code"][star_sphere]
+    if gfm_reconstructed or raw_snap["star_mass_init_code"] is None:
+        smass_init_code = smass_code
+    else:
+        smass_init_code = raw_snap["star_mass_init_code"][star_sphere]
+
+    stars = dict(
+        pos       = raw_snap["star_pos"][star_sphere][real_stars],
+        mass      = U.code_mass_to_msun(smass_code[real_stars], h),
+        mass_init = U.code_mass_to_msun(smass_init_code[real_stars], h),
+        a_form    = gform[real_stars].astype(np.float64),
+    )
+
+    # ── BH sphere mask ────────────────────────────────────────────────────────
+    if raw_snap["bh_pos"] is not None and len(raw_snap["bh_pos"]) > 0:
+        bdpos = raw_snap["bh_pos"] - sub_pos
+        bdpos -= box_kpc * np.round(bdpos / box_kpc)
+        bh_mask = np.linalg.norm(bdpos, axis=1) < r200c
+        n_bh = int(bh_mask.sum())
+        bh = dict(
+            pos    = raw_snap["bh_pos"][bh_mask],
+            mass   = U.code_mass_to_msun(raw_snap["bh_mass_code"][bh_mask], h),
+            mdot   = U.bh_mdot_to_msun_yr(raw_snap["bh_mdot_code"][bh_mask]),
+            egy_qm = np.zeros(n_bh),
+            egy_rm = np.zeros(n_bh),
+        )
+    else:
+        bh = dict(pos=np.zeros((0, 3)), mass=np.zeros(0),
+                  mdot=np.zeros(0), egy_qm=np.zeros(0), egy_rm=np.zeros(0))
+
+    return dict(
+        gas=gas, stars=stars, bh=bh,
+        subhalo=dict(pos=sub_pos, vel=sub_vel, r200c=r200c, m200c=m200c),
+        meta=dict(
+            halo_id=int(halo_index), subhalo_id=int(first_sub),
+            h=h, a=a, box_kpc=box_kpc,
+            Omega_m=raw_snap["Omega_m"], Omega_L=raw_snap["Omega_L"],
+            gfm_initial_mass_reconstructed=gfm_reconstructed,
+        ),
+    )

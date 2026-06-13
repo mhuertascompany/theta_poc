@@ -106,78 +106,33 @@ def _cat_path(reg, sim_id):
             / sim_id / "groups_090.hdf5")
 
 
-# ── per-halo processing ───────────────────────────────────────────────────────
-
-def _process_halo(halo_index, snap_path, cat_path, gfm_recon, proto_hash,
-                  suite_key, sim_row, git_commit):
-    """Load particles, run CAMELS descriptors, return flat dict row."""
-    halo = loaders.load_halo_camels(
-        snap_path, cat_path, int(halo_index), gfm_recon)
-
-    halo["gas"] = selection.to_halo_frame(
-        halo["gas"], halo["subhalo"], halo["meta"]["box_kpc"])
-
-    sub = halo["subhalo"]
-    bh  = halo["bh"]
-
-    M_BH = float(bh["mass"].max()) if len(bh["mass"]) > 0 else 0.0
-
-    SFR_halo = float(
-        halo["gas"]["sfr"][
-            selection.aperture_mask(halo["gas"], sub["r200c"], C.PROTOCOL)
-        ].sum()
-    )
-
-    row = dict(
-        # halo properties
-        suite_key     = suite_key,
-        halo_id       = int(halo_index),
-        subhalo_id    = int(halo["meta"]["subhalo_id"]),
-        logM200c      = float(np.log10(sub["m200c"])),
-        M200c         = float(sub["m200c"]),
-        R200c         = float(sub["r200c"]),
-        M_BH          = M_BH,
-        logM_BH       = float(np.log10(M_BH)) if M_BH > 0 else np.nan,
-        SFR_halo      = SFR_halo,
-        n_gas         = len(halo["gas"]["mass"]),
-        # provenance
-        sim_id        = str(sim_row["sim_id"]),
-        varied_param  = str(sim_row["varied_param"]),
-        param_index   = str(sim_row.get("param_index", "")),
-        Omega0        = float(sim_row["Omega0"]),
-        sigma8        = float(sim_row["sigma8"]),
-        A_SN1         = float(sim_row["A_SN1"]),
-        A_AGN1        = float(sim_row["A_AGN1"]),
-        A_SN2         = float(sim_row["A_SN2"]),
-        A_AGN2        = float(sim_row["A_AGN2"]),
-        protocol_hash = proto_hash,
-        git_commit    = git_commit,
-        camels_release= CAMELS_RELEASE,
-    )
-
-    for name, mod in CAMELS_DESCRIPTORS:
-        res = mod.compute(halo, C.PROTOCOL)
-        row[name]             = float(res.get("value", np.nan))
-        row[f"{name}_n_used"] = int(res.get("n_used", 0))
-        if name == "p_star":
-            row["p_star_n_recent"] = int(res.get("n_recent_stars", 0))
-
-    return row
-
-
-# ── per-sim runner ─────────────────────────────────────────────────────────────
+# ── per-sim runner ────────────────────────────────────────────────────────────
 
 def run_sim(suite_key, sim_row, reg, proto_hash, git_commit, out_dir):
     """
     Extract descriptors for all central halos in one sim.
-    Returns (n_halos, n_pivot, n_errors) tuple.
+
+    Reads the snapshot ONCE into memory (load_snapshot_camels), then does
+    all sphere-masks in RAM (extract_halo_from_snapshot).  This is ~50-100×
+    faster than re-opening the HDF5 file per halo.
+
+    Parquet is written atomically: rows go to <sim_id>.tmp.parquet first,
+    then renamed to the final name.  A session dying mid-sim leaves a .tmp
+    file that gets cleaned up on the next run.
+
+    Returns (n_halos, n_pivot, n_errors) or (None, None, None) if skipped.
     """
     sim_id    = str(sim_row["sim_id"])
     out_path  = out_dir / f"{sim_id}_p{proto_hash}.parquet"
+    tmp_path  = out_dir / f"{sim_id}_p{proto_hash}.tmp.parquet"
 
     if out_path.exists():
         print(f"  [SKIP] {sim_id} — parquet exists")
         return None, None, None
+
+    # clean up any leftover .tmp from a previous crashed run
+    if tmp_path.exists():
+        tmp_path.unlink()
 
     snap = _snap_path(reg, sim_id)
     cat  = _cat_path(reg, sim_id)
@@ -188,29 +143,73 @@ def run_sim(suite_key, sim_row, reg, proto_hash, git_commit, out_dir):
 
     gfm_recon = reg["gfm_initial_mass_reconstructed"]
 
-    with h5py.File(snap, "r") as sf:
-        hdr = dict(sf["Header"].attrs)
-        h   = float(hdr["HubbleParam"])
-        a   = float(hdr["Time"])
+    # ── load snapshot once into memory ────────────────────────────────────────
+    t_load = time.time()
+    print(f"  [LOAD] {sim_id} ...", end="", flush=True)
+    raw = loaders.load_snapshot_camels(snap, cat)
+    print(f" {time.time()-t_load:.1f}s", flush=True)
 
-    group_ids = loaders.select_centrals_camels(cat, h, a, C.CAMELS_HALO_SELECT)
+    group_ids = loaders.select_centrals_from_snapshot(raw, C.CAMELS_HALO_SELECT)
 
     if len(group_ids) == 0:
         print(f"  [WARN] {sim_id} — no centrals in CAMELS_HALO_SELECT range")
         pd.DataFrame([]).to_parquet(out_path, index=False)
         return 0, 0, 0
 
+    # ── halo loop (in-memory sphere masks) ────────────────────────────────────
     rows   = []
     errors = []
-    t0     = time.time()
+    t_loop = time.time()
 
     for halo_id in group_ids:
         try:
-            row = _process_halo(
-                halo_id, snap, cat, gfm_recon,
-                proto_hash, suite_key, sim_row, git_commit,
+            halo = loaders.extract_halo_from_snapshot(raw, int(halo_id), gfm_recon)
+            halo["gas"] = selection.to_halo_frame(
+                halo["gas"], halo["subhalo"], halo["meta"]["box_kpc"])
+
+            sub  = halo["subhalo"]
+            bh   = halo["bh"]
+            M_BH = float(bh["mass"].max()) if len(bh["mass"]) > 0 else 0.0
+            SFR_halo = float(
+                halo["gas"]["sfr"][
+                    selection.aperture_mask(halo["gas"], sub["r200c"], C.PROTOCOL)
+                ].sum()
             )
+
+            row = dict(
+                suite_key     = suite_key,
+                halo_id       = int(halo_id),
+                subhalo_id    = int(halo["meta"]["subhalo_id"]),
+                logM200c      = float(np.log10(sub["m200c"])),
+                M200c         = float(sub["m200c"]),
+                R200c         = float(sub["r200c"]),
+                M_BH          = M_BH,
+                logM_BH       = float(np.log10(M_BH)) if M_BH > 0 else np.nan,
+                SFR_halo      = SFR_halo,
+                n_gas         = len(halo["gas"]["mass"]),
+                sim_id        = sim_id,
+                varied_param  = str(sim_row["varied_param"]),
+                param_index   = str(sim_row.get("param_index", "")),
+                Omega0        = float(sim_row["Omega0"]),
+                sigma8        = float(sim_row["sigma8"]),
+                A_SN1         = float(sim_row["A_SN1"]),
+                A_AGN1        = float(sim_row["A_AGN1"]),
+                A_SN2         = float(sim_row["A_SN2"]),
+                A_AGN2        = float(sim_row["A_AGN2"]),
+                protocol_hash = proto_hash,
+                git_commit    = git_commit,
+                camels_release= CAMELS_RELEASE,
+            )
+
+            for name, mod in CAMELS_DESCRIPTORS:
+                res = mod.compute(halo, C.PROTOCOL)
+                row[name]             = float(res.get("value", np.nan))
+                row[f"{name}_n_used"] = int(res.get("n_used", 0))
+                if name == "p_star":
+                    row["p_star_n_recent"] = int(res.get("n_recent_stars", 0))
+
             rows.append(row)
+
         except Exception as e:
             errors.append({"halo_id": int(halo_id), "error": str(e)})
             if len(errors) <= 3:
@@ -218,20 +217,26 @@ def run_sim(suite_key, sim_row, reg, proto_hash, git_commit, out_dir):
 
     df = pd.DataFrame(rows)
 
-    # compute n_halos_pivot and attach as a column so it's in the parquet
     pivot_mask = (
         (df["logM200c"] >= C.PIVOT["logM200_lo"]) &
         (df["logM200c"] <  C.PIVOT["logM200_hi"])
     ) if len(df) > 0 else pd.Series(dtype=bool)
     n_pivot = int(pivot_mask.sum())
     if len(df) > 0:
-        df["n_halos_pivot"] = n_pivot   # same value on every row (sim-level scalar)
+        df["n_halos_pivot"] = n_pivot
 
-    df.to_parquet(out_path, index=False)
+    # atomic write: tmp → final
+    df.to_parquet(tmp_path, index=False)
+    tmp_path.rename(out_path)
 
-    elapsed = time.time() - t0
+    elapsed_loop = time.time() - t_loop
+    elapsed_total = time.time() - t_load
     print(f"  [DONE] {sim_id}  n_halos={len(df):3d}  n_pivot={n_pivot:3d}"
-          f"  errors={len(errors)}  {elapsed:.1f}s  → {out_path.name}")
+          f"  errors={len(errors)}"
+          f"  load={time.time()-t_load-elapsed_loop:.1f}s"
+          f"  loop={elapsed_loop:.1f}s"
+          f"  total={elapsed_total:.1f}s"
+          f"  → {out_path.name}")
 
     if errors:
         err_path = out_path.with_suffix(".errors.json")

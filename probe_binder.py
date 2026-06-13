@@ -427,8 +427,8 @@ def run_timing_test():
 
     if projected_min > 20:
         _warn(f"Full-sim extraction {projected_min:.0f} min/sim — "
-              "17 sims/suite would take {17*projected_min/60:.1f} h; "
-              "consider capping to pivot bin only")
+              f"20 sims/suite would take {20*projected_min/60:.1f} h; "
+              f"consider batch loader (see run_camels.py)")
     else:
         _ok(f"Timing OK: ~{projected_min:.1f} min/sim")
 
