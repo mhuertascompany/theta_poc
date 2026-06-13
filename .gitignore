@@ -5,3 +5,6 @@ slurm/cluster.env        # cluster-specific paths/account — keep out of git
 /virgotng_*              # never commit real data
 *.hdf5                   # except the tiny fixtures, force-added below
 !fixtures/*.hdf5
+outputs/                 # extraction products (parquets, logs) — not tracked
+tables/                  # same for existing cluster output tables
+provenance/              # onep_map.csv and probe logs — generated, not tracked
