@@ -376,7 +376,122 @@ def main():
         proto_hash=proto_hash,
     )
 
+    # ── optional: cross-code robustness test ─────────────────────────────────
+    simba_catalog = (pathlib.Path(args.parquet_root).parent
+                     / "camels_simba_1p" / "catalog_x_1p.parquet")
+    if simba_catalog.exists():
+        print("\n── Cross-code robustness test (SIMBA-1P) ────────────────────")
+        cross_code_test(posterior, simba_catalog,
+                        theta_mean, theta_std, x_mean, x_std, x_cols,
+                        outdir=args.outdir, proto_hash=proto_hash)
+    else:
+        print(f"\n[INFO] Cross-code test skipped — {simba_catalog} not found.")
+        print("       Run on Binder:  python extract_catalog_1p.py camels_simba_1p")
+
     print("\nDone.")
+
+
+def cross_code_test(posterior, simba_path,
+                    theta_mean, theta_std, x_mean, x_std, x_cols,
+                    outdir, proto_hash=""):
+    """
+    Apply TNG-trained NPE to SIMBA-1P catalog summaries.
+
+    For each SIMBA 1P sim:
+      - x_simba (catalog observables) → posterior p(θ|x_simba) from TNG NPE
+      - θ_simba (measured by frozen protocol on SIMBA snapshot)
+      - Compare predicted vs measured
+
+    If descriptors are cross-suite robust: measured θ_simba should fall within
+    the predicted posterior.  If only input params were robust, this would fail.
+    """
+    import torch
+
+    df = pd.read_parquet(simba_path)
+    # filter finite θ and x
+    x_avail = [c for c in x_cols if c in df.columns]
+    ok = df[["eta_M_median", "f_hot_median"]].notna().all(axis=1)
+    ok &= df[x_avail].notna().all(axis=1)
+    df = df[ok].copy()
+
+    if len(df) < 3:
+        print("  [WARN] too few valid SIMBA sims for cross-code test")
+        return
+
+    print(f"  {len(df)} SIMBA-1P sims with finite θ and x")
+
+    x_simba     = df[x_avail].values.astype(np.float64)
+    theta_simba = df[["eta_M_median", "f_hot_median"]].values.astype(np.float64)
+
+    # standardize using TNG training statistics
+    x_simba_z     = (x_simba - x_mean) / np.where(x_std > 0, x_std, 1.0)
+    theta_simba_z = (theta_simba - theta_mean) / theta_std
+
+    # posterior coverage: for each SIMBA sim, what fraction of TNG posterior
+    # samples lie closer to the origin than the true SIMBA θ?
+    # (coverage fraction near 0.5 → well-calibrated; near 0 or 1 → biased)
+    n_samples = 2000
+    coverage  = []
+    pred_medians = []
+
+    for i in range(len(df)):
+        x_obs = torch.tensor(x_simba_z[i:i+1].astype(np.float32))
+        with torch.no_grad():
+            samp = posterior.sample(
+                (n_samples,), x=x_obs, show_progress_bars=False).numpy()
+        # posterior predictive median (in standardized space → back to physical)
+        pred_med = samp.mean(axis=0) * theta_std + theta_mean
+        pred_medians.append(pred_med)
+        # coverage: rank of true θ among samples
+        true_z = theta_simba_z[i]
+        dist_samples = np.linalg.norm(samp, axis=1)
+        dist_true    = np.linalg.norm(true_z)
+        coverage.append(float((dist_samples < dist_true).mean()))
+
+    pred_medians = np.array(pred_medians)
+    coverage     = np.array(coverage)
+
+    print(f"  Mean coverage: {coverage.mean():.2f}  (0.5 = perfectly calibrated)")
+    print(f"  Predicted η_M range: [{pred_medians[:,0].min():.2f},"
+          f" {pred_medians[:,0].max():.2f}]")
+    print(f"  Measured  η_M range: [{theta_simba[:,0].min():.2f},"
+          f" {theta_simba[:,0].max():.2f}]")
+
+    # ── Figure: predicted vs measured θ for SIMBA ─────────────────────────────
+    fig, axes = plt.subplots(1, 2, figsize=(8, 3.5), constrained_layout=True)
+
+    varied = df["varied_param"].values
+    colors = {"A_SN1": "#1f77b4", "A_AGN1": "#d62728",
+              "A_SN2": "#2ca02c", "A_AGN2": "#ff7f0e"}
+
+    for desc_i, (ax, lbl) in enumerate(zip(axes, THETA_LABELS)):
+        meas  = theta_simba[:, desc_i]
+        pred  = pred_medians[:, desc_i]
+        for vp, color in colors.items():
+            m = varied == vp
+            ax.scatter(meas[m], pred[m], c=color, s=30, alpha=0.8,
+                       label=vp, zorder=3)
+        lo = min(meas.min(), pred.min()) * 0.9
+        hi = max(meas.max(), pred.max()) * 1.1
+        ax.plot([lo, hi], [lo, hi], "k--", lw=1, alpha=0.5, label="1:1")
+        ax.set_xlabel(f"Measured {lbl}  (SIMBA)", fontsize=10)
+        ax.set_ylabel(f"Predicted {lbl}  (TNG NPE)", fontsize=10)
+        ax.set_title("Cross-code transfer", fontsize=10)
+        if desc_i == 0:
+            ax.legend(fontsize=7, frameon=False, ncol=2)
+
+    fig.suptitle(
+        "TNG-trained NPE evaluated on SIMBA-1P\n"
+        "Descriptor robustness: if calibrated → descriptors span a common space",
+        fontsize=9,
+    )
+
+    stem = f"figure_crosscode_p{proto_hash}" if proto_hash else "figure_crosscode"
+    for ext in ("pdf", "png"):
+        out = pathlib.Path(outdir) / f"{stem}.{ext}"
+        fig.savefig(out, dpi=150, bbox_inches="tight")
+        print(f"  Saved: {out}")
+    plt.close(fig)
 
 
 if __name__ == "__main__":
