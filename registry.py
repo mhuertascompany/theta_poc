@@ -22,6 +22,13 @@ _SNAP_Z0_SIMBA = 151   # SIMBA: 152 snapshots (0–151), z=0 → snap 151
 _SIMBA_CORRUPT_SNAPS = {126}
 
 
+def _camels_z_to_snap(z):
+    """CAMELS: z=0 is snapshot 090 for all suites. Only z=0 used in pilot."""
+    if z == 0.0:
+        return 90
+    raise NotImplementedError(f"CAMELS snapnum for z={z} not mapped")
+
+
 def _tng_z_to_snap(z):
     """Placeholder: full TNG z→snapnum map (100 entries). Verify on cluster."""
     if z == 0.0:
@@ -182,6 +189,137 @@ SUITES = {
         mode_logs_qm              = False,
         mode_logs_rm              = False,
         has_wind_pt4              = True,    # confirmed; same convention as TNG
+        has_subhalo_flag          = False,
+        duplicate_particle_ids    = True,
+        gfm_initial_mass_reconstructed = True,
+    ),
+
+    # ── CAMELS (Binder: /home/jovyan/Data/) ───────────────────────────────────
+    # These entries use snap_root + suite_dir instead of path (no illustris_python).
+    # Loaded by loaders.load_halo_camels and run_camels.py via h5py only.
+    # snap_root/Sims/<suite_dir>/<set_name>/<sim_id>/snapshot_090.hdf5
+    # snap_root/Sims/<suite_dir>/<set_name>/<sim_id>/groups_090.hdf5
+    # h=0.6711, box=25 Mpc/h, 256³, m_gas≈1.27e7 Msun/h (from header at runtime).
+
+    "camels_tng_1p": dict(
+        snap_root   = "/home/jovyan/Data",
+        suite_dir   = "IllustrisTNG",
+        set_name    = "1P",
+        snapnum     = 90,
+        z_to_snap   = _camels_z_to_snap,
+        sim_family  = "TNG",
+        m_gas_msun  = 1.27e7,
+        box_cmpc    = 25.0 / 0.6711,        # ≈37.3 cMpc; exact h from header
+        mode_logs_qm              = True,
+        mode_logs_rm              = True,
+        has_wind_pt4              = True,
+        has_subhalo_flag          = True,
+        duplicate_particle_ids    = False,
+        gfm_initial_mass_reconstructed = False,
+    ),
+
+    "camels_simba_1p": dict(
+        snap_root   = "/home/jovyan/Data",
+        suite_dir   = "SIMBA",
+        set_name    = "1P",
+        snapnum     = 90,
+        z_to_snap   = _camels_z_to_snap,
+        sim_family  = "SIMBA",
+        m_gas_msun  = 1.27e7,
+        box_cmpc    = 25.0 / 0.6711,
+        # QM/RM energy fields absent in SIMBA (not just zero).
+        mode_logs_qm              = False,
+        mode_logs_rm              = False,
+        # Wind particles encoded as PT4 with GFM_StellarFormationTime < 0.
+        has_wind_pt4              = True,
+        has_subhalo_flag          = False,   # use GroupFirstSub only
+        duplicate_particle_ids    = True,
+        gfm_initial_mass_reconstructed = True,  # fall back to Masses
+    ),
+
+    # Optional bonus entries: Swift-EAGLE and Astrid (mounted on Binder).
+    # Field quirks unknown — run inspect_fields before trusting; defer if nontrivial.
+    "camels_eagle_1p": dict(
+        snap_root   = "/home/jovyan/Data",
+        suite_dir   = "Swift-EAGLE",
+        set_name    = "1P",
+        snapnum     = 90,
+        z_to_snap   = _camels_z_to_snap,
+        sim_family  = "EAGLE",
+        m_gas_msun  = 1.27e7,
+        box_cmpc    = 25.0 / 0.6711,
+        mode_logs_qm              = True,
+        mode_logs_rm              = False,   # EAGLE single thermal mode; RM≡0
+        has_wind_pt4              = False,
+        has_subhalo_flag          = True,
+        duplicate_particle_ids    = False,
+        gfm_initial_mass_reconstructed = False,
+    ),
+
+    "camels_astrid_1p": dict(
+        snap_root   = "/home/jovyan/Data",
+        suite_dir   = "Astrid",
+        set_name    = "1P",
+        snapnum     = 90,
+        z_to_snap   = _camels_z_to_snap,
+        sim_family  = "TNG",              # Astrid uses MP-Gadget, TNG-ized format
+        m_gas_msun  = 1.27e7,
+        box_cmpc    = 25.0 / 0.6711,
+        mode_logs_qm              = True,
+        mode_logs_rm              = True,
+        has_wind_pt4              = True,
+        has_subhalo_flag          = True,
+        duplicate_particle_ids    = False,
+        gfm_initial_mass_reconstructed = False,
+    ),
+
+    # LH sets for Exp 2 (SBI pilot, Stage A on Binder or JZ).
+    "camels_tng_lh": dict(
+        snap_root   = "/home/jovyan/Data",
+        suite_dir   = "IllustrisTNG",
+        set_name    = "LH",
+        snapnum     = 90,
+        z_to_snap   = _camels_z_to_snap,
+        sim_family  = "TNG",
+        m_gas_msun  = 1.27e7,
+        box_cmpc    = 25.0 / 0.6711,
+        mode_logs_qm              = True,
+        mode_logs_rm              = True,
+        has_wind_pt4              = True,
+        has_subhalo_flag          = True,
+        duplicate_particle_ids    = False,
+        gfm_initial_mass_reconstructed = False,
+    ),
+
+    "camels_tng_cv0": dict(
+        snap_root   = "/home/jovyan/Data",
+        suite_dir   = "IllustrisTNG",
+        set_name    = "CV",
+        snapnum     = 90,
+        z_to_snap   = _camels_z_to_snap,
+        sim_family  = "TNG",
+        m_gas_msun  = 1.27e7,
+        box_cmpc    = 25.0 / 0.6711,
+        mode_logs_qm              = True,
+        mode_logs_rm              = True,
+        has_wind_pt4              = True,
+        has_subhalo_flag          = True,
+        duplicate_particle_ids    = False,
+        gfm_initial_mass_reconstructed = False,
+    ),
+
+    "camels_simba_cv0": dict(
+        snap_root   = "/home/jovyan/Data",
+        suite_dir   = "SIMBA",
+        set_name    = "CV",
+        snapnum     = 90,
+        z_to_snap   = _camels_z_to_snap,
+        sim_family  = "SIMBA",
+        m_gas_msun  = 1.27e7,
+        box_cmpc    = 25.0 / 0.6711,
+        mode_logs_qm              = False,
+        mode_logs_rm              = False,
+        has_wind_pt4              = True,
         has_subhalo_flag          = False,
         duplicate_particle_ids    = True,
         gfm_initial_mass_reconstructed = True,

@@ -25,6 +25,12 @@ HALO_SELECT = dict(
     min_n_gas     = 500,
 )
 
+# CAMELS-specific overrides: smaller box (25 Mpc/h) → cap logM200 at 13.
+CAMELS_HALO_SELECT = {**HALO_SELECT, "logM200_max": 13.0}
+
+# Pivot mass bin for CAMELS descriptor summaries (P1 figure x = descriptor loci here).
+PIVOT = dict(logM200_lo=11.75, logM200_hi=12.25)
+
 HALO_BINS = np.arange(11.5, 14.01, 0.25)   # log10 M200c [Msun]
 BH_BINS   = np.arange(6.5,   9.51, 0.25)   # log10 M_BH  [Msun]
 

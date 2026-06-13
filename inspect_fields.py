@@ -222,5 +222,142 @@ def main():
         print(f"  {k}: {v}")
 
 
+# ── CAMELS inspector (h5py only — no illustris_python) ───────────────────────
+
+_GAS_REQUIRED = [
+    "Coordinates", "Velocities", "Masses", "Density",
+    "InternalEnergy", "ElectronAbundance", "StarFormationRate",
+]
+_STAR_REQUIRED = ["Coordinates", "Masses", "GFM_StellarFormationTime"]
+_CAT_GROUP_REQUIRED = [
+    "Group_M_Crit200", "Group_R_Crit200", "GroupPos",
+    "GroupFirstSub", "GroupLenType",
+]
+_CAT_SUB_REQUIRED = ["SubhaloPos", "SubhaloVel"]
+
+
+def inspect_camels_snap(snap_path, cat_path, suite_key):
+    """
+    GATE A check for a single CAMELS snapshot + catalog pair (h5py only).
+
+    Asserts per-suite field expectations from registry and §A invariants.
+    Returns True if all checks pass.
+
+    Parameters
+    ----------
+    snap_path : path to snapshot_090.hdf5
+    cat_path  : path to groups_090.hdf5
+    suite_key : registry key, e.g. "camels_tng_1p" or "camels_simba_1p"
+    """
+    reg    = R.get_suite(suite_key)
+    family = reg["sim_family"]
+    gfm_recon = reg["gfm_initial_mass_reconstructed"]
+    all_ok = True
+
+    print(f"\n{'='*60}")
+    print(f"  CAMELS inspect: {suite_key}  ({snap_path})")
+    print(f"{'='*60}")
+
+    with h5py.File(snap_path, "r") as sf:
+        hdr = dict(sf["Header"].attrs)
+        print("\nHeader:")
+        for k in ["HubbleParam", "Time", "Redshift", "BoxSize", "NumPart_Total"]:
+            print(f"  {k}: {hdr.get(k, 'MISSING')}")
+
+        redshift = float(hdr.get("Redshift", -1))
+        if abs(redshift) > 0.01:
+            print(f"  [WARN] Redshift={redshift:.4f} — expected z≈0 (snap 090)")
+            all_ok = False
+        else:
+            print(f"  [OK] Redshift≈0 confirmed")
+
+        # ── gas fields ────────────────────────────────────────────────────────
+        pt0_keys = set(sf.get("PartType0", {}).keys())
+        print(f"\nGas (PartType0) — {len(pt0_keys)} fields:")
+        for f in _GAS_REQUIRED:
+            ok = f in pt0_keys
+            print(f"  {'[OK]' if ok else '[MISSING]'} {f}")
+            all_ok = all_ok and ok
+
+        # ── star fields ───────────────────────────────────────────────────────
+        pt4_keys = set(sf.get("PartType4", {}).keys())
+        print(f"\nStars (PartType4) — {len(pt4_keys)} fields:")
+        for f in _STAR_REQUIRED:
+            ok = f in pt4_keys
+            print(f"  {'[OK]' if ok else '[MISSING]'} {f}")
+            all_ok = all_ok and ok
+
+        has_gfm_init = "GFM_InitialMass" in pt4_keys
+        if gfm_recon:
+            if has_gfm_init:
+                print("  [INFO] GFM_InitialMass present despite gfm_reconstructed=True"
+                      " — Masses will still be used per registry flag")
+            else:
+                print("  [OK] GFM_InitialMass absent — Masses fallback confirmed"
+                      " (gfm_reconstructed=True)")
+        else:
+            if has_gfm_init:
+                print("  [OK] GFM_InitialMass present")
+            else:
+                print("  [FAIL] GFM_InitialMass MISSING but gfm_reconstructed=False")
+                all_ok = False
+
+        # ── wind particle count ───────────────────────────────────────────────
+        if "GFM_StellarFormationTime" in pt4_keys:
+            gform = sf["PartType4/GFM_StellarFormationTime"][:]
+            n_wind = int((gform < 0).sum())
+            n_real = int((gform > 0).sum())
+            expected_wind = reg["has_wind_pt4"]
+            observed_wind = n_wind > 0
+            tag = "[OK]" if (observed_wind == expected_wind) else "[MISMATCH]"
+            print(f"\n  {tag} Wind PT4: {n_wind:,} wind  {n_real:,} real stars"
+                  f"  (registry has_wind_pt4={expected_wind})")
+            all_ok = all_ok and (observed_wind == expected_wind)
+
+        # ── BH fields ─────────────────────────────────────────────────────────
+        pt5_keys = set(sf.get("PartType5", {}).keys())
+        has_qm = "BH_CumEgyInjection_QM" in pt5_keys
+        has_rm = "BH_CumEgyInjection_RM" in pt5_keys
+        print(f"\nBHs (PartType5) — {len(pt5_keys)} fields:")
+        print(f"  BH_CumEgyInjection_QM: {'present' if has_qm else 'absent'}"
+              f"  (registry mode_logs_qm={reg['mode_logs_qm']})")
+        print(f"  BH_CumEgyInjection_RM: {'present' if has_rm else 'absent'}"
+              f"  (registry mode_logs_rm={reg['mode_logs_rm']})")
+
+        if family == "SIMBA":
+            if has_qm or has_rm:
+                print("  [WARN] SIMBA: unexpected QM/RM fields present"
+                      " — verify these are zero or absent per §A")
+            else:
+                print("  [OK] SIMBA: QM/RM absent as expected")
+
+    with h5py.File(cat_path, "r") as cf:
+        grp_keys = set(cf.get("Group", {}).keys())
+        sub_keys = set(cf.get("Subhalo", {}).keys())
+
+        print(f"\nGroup catalog — {len(grp_keys)} fields:")
+        for f in _CAT_GROUP_REQUIRED:
+            ok = f in grp_keys
+            print(f"  {'[OK]' if ok else '[MISSING]'} {f}")
+            all_ok = all_ok and ok
+
+        print(f"\nSubhalo catalog — {len(sub_keys)} fields:")
+        for f in _CAT_SUB_REQUIRED:
+            ok = f in sub_keys
+            print(f"  {'[OK]' if ok else '[MISSING]'} {f}")
+            all_ok = all_ok and ok
+
+        has_flag = "SubhaloFlag" in sub_keys
+        exp_flag = reg["has_subhalo_flag"]
+        tag = "[OK]" if (has_flag == exp_flag) else "[MISMATCH]"
+        print(f"\n  {tag} SubhaloFlag: {'present' if has_flag else 'absent'}"
+              f"  (registry={exp_flag})")
+        all_ok = all_ok and (has_flag == exp_flag)
+
+    result = "PASS" if all_ok else "FAIL"
+    print(f"\n  → {result}: {suite_key}")
+    return all_ok
+
+
 if __name__ == "__main__":
     main()
