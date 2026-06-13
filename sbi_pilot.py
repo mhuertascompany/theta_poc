@@ -65,10 +65,11 @@ THETA_COLS = ["eta_M_median", "f_hot_median"]
 THETA_LABELS = [r"$\eta_M$  (pivot median)", r"$f_{\rm hot}$  (pivot median)"]
 
 X_COLS = (
-    [f"smf_{i}"  for i in range(5)] +
-    [f"fgas_{i}" for i in range(3)] +
-    [f"ssfr_{i}" for i in range(3)]
-)   # 11-dimensional catalog summaries
+    ["Omega0", "sigma8"] +            # cosmological context (known from CMB/BAO)
+    [f"smf_{i}"  for i in range(5)] + # stellar mass function counts (5 bins)
+    [f"fgas_{i}" for i in range(3)] + # median gas fraction (3 M* bins)
+    [f"ssfr_{i}" for i in range(3)]   # median log sSFR (3 M* bins)
+)   # 13-dimensional: catalog observables conditioned on cosmology
 
 
 # ── data loading ──────────────────────────────────────────────────────────────
