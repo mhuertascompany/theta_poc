@@ -192,7 +192,7 @@ def make_figure(df, outdir, proto_hash=""):
     # ── column headers ────────────────────────────────────────────────────────
     for col_i, (param_col, col_title, subtitle) in enumerate(PARAMS):
         axes[0, col_i].set_title(
-            f"$\\bf{{{col_title.replace(' ', r'\,')}}}$\n{subtitle}",
+            col_title + "\n" + subtitle,
             fontsize=8.5, pad=5, linespacing=1.5,
         )
 
