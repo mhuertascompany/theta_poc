@@ -107,10 +107,13 @@ def check_mount():
         else:
             _warn(f"FOF_Subfind/{suite_dir}/1P/ absent — using Sims/ copy only")
 
-    # Spot-check one fiducial sim
+    # Spot-check one fiducial sim per suite.
+    # Use 1P_p3_0 (A_SN1 sweep fiducial) — exists for both TNG and SIMBA.
+    # TNG also has a shared 1P_0 but SIMBA does not.
     for suite_key, (suite_dir, _) in CAMELS_SUITES.items():
-        snap = ROOT / "Sims" / suite_dir / "1P" / "1P_0" / f"snapshot_{SNAPNUM}.hdf5"
-        cat  = ROOT / "Sims" / suite_dir / "1P" / "1P_0" / f"groups_{SNAPNUM}.hdf5"
+        fid = "1P_p3_0"
+        snap = ROOT / "Sims" / suite_dir / "1P" / fid / f"snapshot_{SNAPNUM}.hdf5"
+        cat  = ROOT / "Sims" / suite_dir / "1P" / fid / f"groups_{SNAPNUM}.hdf5"
         if snap.exists():
             _ok(f"Snapshot found: {snap.relative_to(ROOT)}")
         else:
@@ -138,61 +141,62 @@ def _find_cosmoastro(suite_dir, filename):
     return None
 
 
-def _parse_cosmoastro(fpath):
+def _parse_cosmoastro_named(fpath):
     """
-    Parse a CosmoAstroSeed txt file.  Returns (header_cols, data_array).
-    Skips lines starting with '#'; treats first non-comment line as data.
-    Tries to detect a header line (first token non-numeric).
+    Parse a CosmoAstroSeed txt file.
+
+    Actual format (both TNG and SIMBA):
+        #Name Omega0 sigma8 A_SN1 A_AGN1 A_SN2 A_AGN2 ...
+        1P_p1_n2   0.1  0.8  <val> ...
+
+    First column is the sim name (non-numeric string).
+    Returns (header_tokens, dict[sim_name → list_of_floats]).
+    The float list starts at Omega0 (i.e., the Name column is stripped).
     """
-    lines = fpath.read_text().splitlines()
-    header_cols = None
-    rows = []
-    for line in lines:
+    result  = {}
+    header  = None
+    for line in fpath.read_text().splitlines():
         line = line.strip()
         if not line:
             continue
         if line.startswith("#"):
-            # might be a header comment: "# Omega_m sigma_8 ..."
-            tokens = line.lstrip("#").split()
-            if tokens and not _is_numeric(tokens[0]):
-                header_cols = tokens
+            header = line.lstrip("#").split()   # e.g. ['Name','Omega0','sigma8',...]
             continue
         tokens = line.split()
-        if not _is_numeric(tokens[0]):
-            # header row embedded in data
-            header_cols = tokens
+        if len(tokens) < 7:
             continue
-        rows.append([float(t) for t in tokens])
-    return header_cols, np.array(rows)
+        sim_name = tokens[0]
+        try:
+            numeric = [float(t) for t in tokens[1:]]
+        except ValueError:
+            continue
+        result[sim_name] = numeric
+    return header, result
 
 
-def _is_numeric(s):
-    try:
-        float(s)
-        return True
-    except ValueError:
-        return False
+import re as _re
+# Matches exactly 1P_p{3,4,5,6}_{n2,n1,0,1,2}
+_P1_FEEDBACK_RE = _re.compile(r'^1P_p([3456])_(n2|n1|0|1|2)$')
 
-
-def _sim_ids_for_suite(suite_dir):
-    """Return sorted list of 1P sim directory names that exist on disk."""
-    base = ROOT / "Sims" / suite_dir / "1P"
-    if not base.exists():
-        return []
-    dirs = sorted(d.name for d in base.iterdir() if d.is_dir())
-    return dirs
+_FEEDBACK_PARAM = {
+    "3": ("A_SN1",  3),
+    "4": ("A_AGN1", 4),
+    "5": ("A_SN2",  5),
+    "6": ("A_AGN2", 6),
+}
 
 
 def build_onep_map():
     """
     Read CosmoAstroSeed files and build provenance/onep_map.csv.
 
-    For each suite, identifies:
-    - which row corresponds to the fiducial (1P_0)
-    - which feedback parameter varies in each row (p3..p6)
-    - the exact parameter values from the file
+    Selects only 1P_p{3,4,5,6}_{n2,n1,0,1,2} rows = 20 sims per suite.
+    The _0 variant is the fiducial point on each parameter curve.
+    Both TNG and SIMBA follow this layout; TNG also has a 1P_0 shared
+    fiducial directory which is not in the file and not needed for P1.
 
-    Returns list of row dicts; writes CSV.
+    Columns in CSV: suite_key, sim_id, varied_param, param_index,
+                    Omega0, sigma8, A_SN1, A_AGN1, A_SN2, A_AGN2.
     """
     print(f"\n{'='*60}")
     print("2. CosmoAstroSeed parsing → provenance/onep_map.csv")
@@ -205,105 +209,63 @@ def build_onep_map():
     for suite_key, (suite_dir, filename) in CAMELS_SUITES.items():
         fpath = _find_cosmoastro(suite_dir, filename)
         if fpath is None:
-            _fail(f"{filename} not found in any candidate location for {suite_key}")
+            _fail(f"{filename} not found for {suite_key}")
             ok = False
             continue
         _ok(f"Found {fpath.relative_to(ROOT) if ROOT in fpath.parents else fpath}")
 
-        header_cols, data = _parse_cosmoastro(fpath)
+        header, rows_by_name = _parse_cosmoastro_named(fpath)
+        _ok(f"{suite_key}: {len(rows_by_name)} named rows parsed from file")
 
-        # We need at least 6 columns (p1..p6)
-        if data.shape[1] < 6:
-            _fail(f"{suite_key}: only {data.shape[1]} columns — expected ≥6")
+        # Select only the 20 feedback 1P sims (p3..p6, 5 variations each)
+        suite_rows = []
+        for sim_name in sorted(rows_by_name):
+            m = _P1_FEEDBACK_RE.match(sim_name)
+            if not m:
+                continue
+            p_str   = m.group(1)       # "3","4","5","6"
+            numeric = rows_by_name[sim_name]
+            if len(numeric) < 6:
+                _warn(f"  {sim_name}: only {len(numeric)} columns, skipping")
+                continue
+            param_name, param_index = _FEEDBACK_PARAM[p_str]
+            suite_rows.append(dict(
+                suite_key    = suite_key,
+                sim_id       = sim_name,
+                varied_param = param_name,
+                param_index  = param_index,
+                Omega0       = float(numeric[0]),
+                sigma8       = float(numeric[1]),
+                A_SN1        = float(numeric[2]),
+                A_AGN1       = float(numeric[3]),
+                A_SN2        = float(numeric[4]),
+                A_AGN2       = float(numeric[5]),
+            ))
+
+        if not suite_rows:
+            _fail(f"{suite_key}: no p3..p6 feedback rows found — check file format")
             ok = False
             continue
 
-        # Extract only the first 6 parameter columns
-        params = data[:, :6]   # Omega0, sigma8, A_SN1, A_AGN1, A_SN2, A_AGN2
+        _ok(f"{suite_key}: {len(suite_rows)} rows selected (p3..p6, 5 pts each)")
 
-        # Identify the fiducial row: all feedback params (cols 2-5) closest to
-        # each other in relative variance — simplest: Omega0≈0.3, sigma8≈0.8
-        # OR row where all feedback multipliers equal (variation = 0 across cols 2-5).
-        # Most robust: pick row where variance of feedback cols is minimal.
-        feedback_vals = params[:, 2:]   # (N, 4)
-        fid_candidates = np.where(
-            np.all(np.abs(feedback_vals - feedback_vals[0]) < 1e-6, axis=1)
-        )[0]
-        if len(fid_candidates) == 0:
-            # Fall back: row with minimum std across feedback cols
-            fid_idx = int(np.argmin(feedback_vals.std(axis=1)))
-            _warn(f"{suite_key}: no identical-fiducial row; using row {fid_idx} as fiducial")
+        # Cosmology sanity: Omega0≈0.3, sigma8≈0.8 in all p3..p6 rows
+        bad = [r["sim_id"] for r in suite_rows
+               if abs(r["Omega0"] - 0.3) > 0.01 or abs(r["sigma8"] - 0.8) > 0.01]
+        if bad:
+            _warn(f"{suite_key}: cosmology off-fiducial in {len(bad)} rows: {bad[:3]}")
         else:
-            fid_idx = int(fid_candidates[0])
-        fid_vals = params[fid_idx, :]
-        _ok(f"{suite_key}: fiducial row {fid_idx}  "
-            f"Ω0={fid_vals[0]:.3f} σ8={fid_vals[1]:.3f} "
-            f"A_SN1={fid_vals[2]:.3f} A_AGN1={fid_vals[3]:.3f} "
-            f"A_SN2={fid_vals[4]:.3f} A_AGN2={fid_vals[5]:.3f}")
+            _ok(f"{suite_key}: Omega0≈0.3 and sigma8≈0.8 confirmed in all rows")
 
-        # Check cosmology fixed in all rows
-        cos_ok = True
-        for i, row in enumerate(params):
-            if abs(row[0] - fid_vals[0]) > 1e-4 or abs(row[1] - fid_vals[1]) > 1e-4:
-                if i != fid_idx:
-                    _warn(f"  row {i}: Omega0={row[0]:.4f} sigma8={row[1]:.4f}"
-                          " deviates from fiducial — may be p1/p2 row, skip")
-                    cos_ok = False
-        if cos_ok:
-            _ok(f"{suite_key}: Omega0 and sigma8 are fiducial across all rows")
+        # Print fiducial (_0) values for each sweep as a sanity reference
+        for p_str, (pname, _) in _FEEDBACK_PARAM.items():
+            fid_key = f"1P_p{p_str}_0"
+            if fid_key in rows_by_name:
+                n = rows_by_name[fid_key]
+                _ok(f"  {fid_key}: A_SN1={n[2]:.4g}  A_AGN1={n[3]:.4g}"
+                    f"  A_SN2={n[4]:.4g}  A_AGN2={n[5]:.4g}")
 
-        # Get available sim directories
-        sim_dirs = _sim_ids_for_suite(suite_dir)
-        _ok(f"{suite_key}: {len(sim_dirs)} sim directories found: {sim_dirs}")
-
-        # Map each row to a sim directory.
-        # Row order in the file matches directory ordering for the 1P set:
-        #   row 0 → 1P_0 (fiducial)
-        #   rows 1..4  → 1P_p3_n2, 1P_p3_n1, 1P_p3_1, 1P_p3_2
-        #   rows 5..8  → 1P_p4_n2, ...
-        #   rows 9..12 → 1P_p5_n2, ...
-        #   rows 13..16→ 1P_p6_n2, ...
-        # Total = 17 rows.  Build the expected ID list.
-        expected_ids = ["1P_0"]
-        for pidx in [3, 4, 5, 6]:
-            for var in VARIATIONS:
-                expected_ids.append(f"1P_p{pidx}_{var}")
-
-        if len(params) != len(expected_ids):
-            _warn(f"{suite_key}: {len(params)} rows but expected {len(expected_ids)}"
-                  " — mapping by order; check if extra rows present")
-
-        for row_i, (sim_id, row) in enumerate(zip(expected_ids, params)):
-            fb = row[2:]   # A_SN1, A_AGN1, A_SN2, A_AGN2
-            fid_fb = fid_vals[2:]
-            diff = np.abs(fb - fid_fb)
-            n_diff = int((diff > 1e-6).sum())
-
-            if sim_id == "1P_0":
-                varied_param = "fiducial"
-                param_index  = ""
-            elif n_diff == 1:
-                col_i = int(np.argmax(diff))
-                varied_param = FEEDBACK_COLS[col_i]
-                param_index  = PARAM_INDICES[varied_param]
-            else:
-                varied_param = "AMBIGUOUS"
-                param_index  = ""
-                _warn(f"  {sim_id}: {n_diff} columns differ from fiducial"
-                      " — possible p1/p2 row; keeping but marking AMBIGUOUS")
-
-            all_rows.append(dict(
-                suite_key   = suite_key,
-                sim_id      = sim_id,
-                varied_param= varied_param,
-                param_index = param_index,
-                Omega0      = float(row[0]),
-                sigma8      = float(row[1]),
-                A_SN1       = float(row[2]),
-                A_AGN1      = float(row[3]),
-                A_SN2       = float(row[4]),
-                A_AGN2      = float(row[5]),
-            ))
+        all_rows.extend(suite_rows)
 
     if all_rows:
         import pandas as pd
@@ -324,8 +286,9 @@ def check_snapnum_and_redshift():
     print(f"{'='*60}")
     ok = True
     for suite_key, (suite_dir, _) in CAMELS_SUITES.items():
-        snap = ROOT / "Sims" / suite_dir / "1P" / "1P_0" / f"snapshot_{SNAPNUM}.hdf5"
-        cat  = ROOT / "Sims" / suite_dir / "1P" / "1P_0" / f"groups_{SNAPNUM}.hdf5"
+        fid = "1P_p3_0"   # exists for both TNG and SIMBA
+        snap = ROOT / "Sims" / suite_dir / "1P" / fid / f"snapshot_{SNAPNUM}.hdf5"
+        cat  = ROOT / "Sims" / suite_dir / "1P" / fid / f"groups_{SNAPNUM}.hdf5"
         if not snap.exists():
             _fail(f"{suite_key}: snapshot not found, skipping header check")
             ok = False
@@ -393,7 +356,7 @@ def run_timing_test():
 
     suite_key  = "camels_tng_1p"
     suite_dir  = "IllustrisTNG"
-    sim_id     = "1P_0"
+    sim_id     = "1P_p3_0"   # A_SN1 fiducial; exists for both TNG and SIMBA
     snap_path  = ROOT / "Sims" / suite_dir / "1P" / sim_id / f"snapshot_{SNAPNUM}.hdf5"
     cat_path   = ROOT / "Sims" / suite_dir / "1P" / sim_id / f"groups_{SNAPNUM}.hdf5"
 
