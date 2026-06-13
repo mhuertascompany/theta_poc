@@ -367,25 +367,6 @@ def run_timing_test():
     reg = R.get_suite(suite_key)
     gfm_recon = reg["gfm_initial_mass_reconstructed"]
 
-    # Select centrals
-    t0 = time.time()
-    with h5py.File(snap_path, "r") as sf:
-        hdr = dict(sf["Header"].attrs)
-        h   = float(hdr["HubbleParam"])
-        a   = float(hdr["Time"])
-
-    group_ids = loaders.select_centrals_camels(cat_path, h, a, C.CAMELS_HALO_SELECT)
-    n_central = len(group_ids)
-    print(f"  Centrals in CAMELS_HALO_SELECT: {n_central}")
-    if n_central == 0:
-        _warn("No centrals found — check selection thresholds")
-        return
-
-    # Process up to 20 halos for timing
-    sample = group_ids[:20]
-    errors = 0
-    t_start = time.time()
-
     DESCRIPTORS_CAMELS = [
         ("eta_M",  eta_M),
         ("f_hot",  f_hot),
@@ -393,10 +374,29 @@ def run_timing_test():
         ("p_star", p_star),
     ]
 
-    for halo_id in sample:
+    t0 = time.time()
+
+    # ── batch path (load_snapshot_camels) ─────────────────────────────────────
+    print(f"  Loading snapshot into memory ...", end="", flush=True)
+    t_load = time.time()
+    raw = loaders.load_snapshot_camels(snap_path, cat_path)
+    t_load_end = time.time()
+    print(f" {t_load_end - t_load:.1f}s")
+
+    group_ids = loaders.select_centrals_from_snapshot(raw, C.CAMELS_HALO_SELECT)
+    n_central = len(group_ids)
+    print(f"  Centrals in CAMELS_HALO_SELECT: {n_central}")
+    if n_central == 0:
+        _warn("No centrals found — check selection thresholds")
+        return
+
+    # Run descriptors on all centrals (not just a sample) to get accurate timing
+    errors = 0
+    t_loop = time.time()
+
+    for halo_id in group_ids:
         try:
-            halo = loaders.load_halo_camels(snap_path, cat_path,
-                                            int(halo_id), gfm_recon)
+            halo = loaders.extract_halo_from_snapshot(raw, int(halo_id), gfm_recon)
             halo["gas"] = selection.to_halo_frame(
                 halo["gas"], halo["subhalo"], halo["meta"]["box_kpc"])
             for name, mod in DESCRIPTORS_CAMELS:
@@ -406,33 +406,32 @@ def run_timing_test():
             if errors <= 3:
                 print(f"  [ERR] halo {halo_id}: {e}")
 
-    t_end = time.time()
-    elapsed = t_end - t_start
-    per_halo = elapsed / len(sample)
+    t_loop_end = time.time()
+
+    load_s  = t_load_end - t_load
+    loop_s  = t_loop_end - t_loop
+    per_halo_ms = loop_s / max(n_central, 1) * 1000
+    total_s = t_loop_end - t0
 
     # Peak RSS (Linux)
     try:
         import resource
-        rss_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        rss_mb = rss_kb / 1024
+        rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
         rss_str = f"  Peak RSS: {rss_mb:.0f} MB"
     except Exception:
         rss_str = "  Peak RSS: unavailable"
 
-    projected_min = per_halo * n_central / 60
-    print(f"\n  Sample: {len(sample)} halos  errors: {errors}")
-    print(f"  Elapsed: {elapsed:.1f}s  per halo: {per_halo*1000:.1f}ms")
-    print(f"  Projected full-sim time: {projected_min:.1f} min ({n_central} centrals)")
+    print(f"\n  All {n_central} centrals  errors: {errors}")
+    print(f"  Snapshot load : {load_s:.1f}s")
+    print(f"  Halo loop     : {loop_s:.1f}s  ({per_halo_ms:.1f} ms/halo)")
+    print(f"  Total per sim : {total_s:.1f}s  ({total_s/60:.1f} min)")
+    print(f"  20 sims/suite : ~{20*total_s/60:.0f} min  ({40*total_s/3600:.1f} h for both suites)")
     print(rss_str)
 
-    if projected_min > 20:
-        _warn(f"Full-sim extraction {projected_min:.0f} min/sim — "
-              f"20 sims/suite would take {20*projected_min/60:.1f} h; "
-              f"consider batch loader (see run_camels.py)")
+    if total_s < 300:
+        _ok(f"Timing OK — batch loader working ({total_s:.0f}s/sim)")
     else:
-        _ok(f"Timing OK: ~{projected_min:.1f} min/sim")
-
-    print(f"\n  Total setup+test time: {time.time()-t0:.1f}s")
+        _warn(f"Still slow ({total_s:.0f}s/sim) — check RAM or I/O")
 
 
 # ── main ─────────────────────────────────────────────────────────────────────
