@@ -230,11 +230,14 @@ SUITES = {
         # QM/RM energy fields absent in SIMBA (not just zero).
         mode_logs_qm              = False,
         mode_logs_rm              = False,
-        # Wind particles encoded as PT4 with GFM_StellarFormationTime < 0.
-        has_wind_pt4              = True,
+        # CAMELS SIMBA uses native GIZMO format: wind particles are PartType0
+        # gas (tracked via NWindLaunches), NOT PartType4. PartType4 contains
+        # only real stars with StellarFormationTime > 0 (no GFM_ prefix).
+        # Distinct from Virgotng Simba25-1 which is TNG-ized and has wind PT4.
+        has_wind_pt4              = False,
         has_subhalo_flag          = False,   # use GroupFirstSub only
         duplicate_particle_ids    = True,
-        gfm_initial_mass_reconstructed = True,  # fall back to Masses
+        gfm_initial_mass_reconstructed = True,  # GFM_InitialMass absent; use Masses
     ),
 
     # Optional bonus entries: Swift-EAGLE and Astrid (mounted on Binder).

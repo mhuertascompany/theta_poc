@@ -228,7 +228,7 @@ _GAS_REQUIRED = [
     "Coordinates", "Velocities", "Masses", "Density",
     "InternalEnergy", "ElectronAbundance", "StarFormationRate",
 ]
-_STAR_REQUIRED = ["Coordinates", "Masses", "GFM_StellarFormationTime"]
+_STAR_REQUIRED = ["Coordinates", "Masses"]   # formation-time field checked separately below
 _CAT_GROUP_REQUIRED = [
     "Group_M_Crit200", "Group_R_Crit200", "GroupPos",
     "GroupFirstSub", "GroupLenType",
@@ -287,6 +287,18 @@ def inspect_camels_snap(snap_path, cat_path, suite_key):
             print(f"  {'[OK]' if ok else '[MISSING]'} {f}")
             all_ok = all_ok and ok
 
+        # Formation-time field: TNG uses GFM_StellarFormationTime; CAMELS SIMBA uses StellarFormationTime
+        if "GFM_StellarFormationTime" in pt4_keys:
+            gform_field = "GFM_StellarFormationTime"
+            print("  [OK]  GFM_StellarFormationTime present (TNG/AREPO format)")
+        elif "StellarFormationTime" in pt4_keys:
+            gform_field = "StellarFormationTime"
+            print("  [OK]  StellarFormationTime present (GIZMO format — CAMELS SIMBA)")
+        else:
+            gform_field = None
+            print("  [WARN] No stellar formation-time field — all PT4 treated as real stars")
+        all_ok = all_ok and (gform_field is not None)
+
         has_gfm_init = "GFM_InitialMass" in pt4_keys
         if gfm_recon:
             if has_gfm_init:
@@ -303,8 +315,8 @@ def inspect_camels_snap(snap_path, cat_path, suite_key):
                 all_ok = False
 
         # ── wind particle count ───────────────────────────────────────────────
-        if "GFM_StellarFormationTime" in pt4_keys:
-            gform = sf["PartType4/GFM_StellarFormationTime"][:]
+        if gform_field is not None:
+            gform = sf[f"PartType4/{gform_field}"][:]
             n_wind = int((gform < 0).sum())
             n_real = int((gform > 0).sum())
             expected_wind = reg["has_wind_pt4"]

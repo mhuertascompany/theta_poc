@@ -361,7 +361,12 @@ def load_halo_camels(snap_path, cat_path, halo_index, gfm_reconstructed=False):
         r_star = np.linalg.norm(sdpos, axis=1)
         star_sphere = r_star < r200c
 
-        gform      = pt4["GFM_StellarFormationTime"][:][star_sphere]
+        _gform_key = ("GFM_StellarFormationTime" if "GFM_StellarFormationTime" in pt4
+                      else "StellarFormationTime" if "StellarFormationTime" in pt4
+                      else None)
+        _gform_all = (pt4[_gform_key][:] if _gform_key is not None
+                      else np.ones(len(pt4["Masses"][:]), dtype=np.float32))
+        gform      = _gform_all[star_sphere]
         real_stars = gform > 0
 
         smass_code = pt4["Masses"][:][star_sphere]
@@ -483,10 +488,17 @@ def load_snapshot_camels(snap_path, cat_path):
         gas_sfr          = sf["PartType0/StarFormationRate"][:].astype(np.float64)
 
         # ── stars ─────────────────────────────────────────────────────────────
+        # Formation-time field: TNG/AREPO uses GFM_StellarFormationTime;
+        # CAMELS SIMBA uses StellarFormationTime (native GIZMO format, always > 0
+        # — wind particles are PartType0 gas, not PartType4).
         pt4       = sf["PartType4"]
         star_pos  = U.comoving_to_physical(
                         pt4["Coordinates"][:].astype(np.float64), a, h)
-        star_gform       = pt4["GFM_StellarFormationTime"][:]
+        _gform_key = ("GFM_StellarFormationTime" if "GFM_StellarFormationTime" in pt4
+                      else "StellarFormationTime" if "StellarFormationTime" in pt4
+                      else None)
+        star_gform = (pt4[_gform_key][:] if _gform_key is not None
+                      else np.ones(len(pt4["Masses"]), dtype=np.float32))
         star_mass_code   = pt4["Masses"][:]
         star_mass_init_code = (pt4["GFM_InitialMass"][:]
                                if "GFM_InitialMass" in pt4 else None)
