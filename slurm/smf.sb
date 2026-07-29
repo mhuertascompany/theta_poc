@@ -1,0 +1,33 @@
+#!/bin/bash -l
+#
+# Stellar mass function extraction at z=0 — one job per suite
+# Catalog-only load (no particles) — fast, low memory
+#
+#SBATCH -J SMF
+#SBATCH -o /u/mhuertas/python/theta_poc/logs/smf.%j.out
+#SBATCH -e /u/mhuertas/python/theta_poc/logs/smf.%j.err
+#SBATCH -D /u/mhuertas/python/theta_poc
+#SBATCH -p p.vera
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=8000MB
+#SBATCH --time=00:15:00
+
+module purge
+module load anaconda/3/2023.03
+
+source /u/mhuertas/python/envs/synth/bin/activate
+
+# Usage:
+#   sbatch smf.sb TNG100-1
+#   sbatch smf.sb Eagle100-1
+#   sbatch smf.sb Simba25-1
+
+if [ -z "$1" ]; then
+    echo "Error: provide a suite key."
+    echo "Usage: sbatch smf.sb <suite_key>"
+    exit 1
+fi
+
+echo "SMF extraction for suite: $1"
+python3 smf.py "$1"
