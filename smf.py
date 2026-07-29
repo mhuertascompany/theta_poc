@@ -79,8 +79,9 @@ def run(suite_key):
 
     # ── stellar masses ─────────────────────────────────────────────────────────
     sub = _il().groupcat.loadSubhalos(path, snap, fields=["SubhaloMassType"])
-    m_star = U.code_mass_to_msun(
-        sub["SubhaloMassType"][:, 4].astype(np.float64), h)   # Msun
+    # illustris_python returns a raw array (not dict) when only one field requested
+    sub_arr = sub["SubhaloMassType"] if isinstance(sub, dict) else sub
+    m_star = U.code_mass_to_msun(sub_arr[:, 4].astype(np.float64), h)   # Msun
 
     valid = m_star > 10**LOGM_MIN
     m_star = m_star[valid]
