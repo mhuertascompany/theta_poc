@@ -8,6 +8,10 @@ computes per central galaxy:
                            (SubhaloHalfmassRadType[:,4]; includes wind PT4
                            in TNG, which has a small effect at z~1)
 
+  Z_star  [dimensionless]  Mass-weighted stellar metallicity (metal mass fraction)
+                           from SubhaloStarMetallicity.  Divide by Z_sun=0.0127
+                           (Asplund+09) for solar units.
+
   Y_SZ    [Mpc²]           Integrated Compton-Y within R_200c
     Y · D_A² = (σ_T / m_e c²) × Σ_i (m_i X_H x_{e,i} / m_p) k_B T_i
     Sum over non-SF gas only — EoS gas temperature is unphysical for tSZ.
@@ -127,6 +131,7 @@ def load_obs_catalog(path, snap, h, a):
     sub = il.groupcat.loadSubhalos(path, snap, fields=[
         "SubhaloPos", "SubhaloVel",
         "SubhaloMassType", "SubhaloHalfmassRadType",
+        "SubhaloStarMetallicity",
     ])
 
     # GroupLenType: always a 2-D array (N_groups, 6) when multiple fields loaded
@@ -144,6 +149,7 @@ def load_obs_catalog(path, snap, h, a):
         r_half    = U.comoving_to_physical(
                         sub["SubhaloHalfmassRadType"][:, 4].astype(np.float64),
                         a, h),
+        Z_star    = sub["SubhaloStarMetallicity"].astype(np.float64),
         sub_pos   = U.comoving_to_physical(sub["SubhaloPos"], a, h),
         sub_vel   = sub["SubhaloVel"].astype(np.float64),
     )
@@ -196,6 +202,7 @@ def process_galaxy(group_id, path, snap, cat, h, a, box_ckpch, cfg):
     m200c   = float(cat["m200c"][group_id])
     m_star  = float(cat["m_star"][fs])
     r_half  = float(cat["r_half"][fs])
+    Z_star  = float(cat["Z_star"][fs])
     sub_pos = cat["sub_pos"][fs]
     sub_vel = cat["sub_vel"][fs]
     box_kpc = U.comoving_to_physical(box_ckpch, a, h)
@@ -233,6 +240,7 @@ def process_galaxy(group_id, path, snap, cat, h, a, box_ckpch, cfg):
         logM200c    = float(np.log10(m200c)) if m200c > 0 else np.nan,
         logM_star   = float(np.log10(m_star)) if m_star > 0 else np.nan,
         r_half_kpc  = r_half,
+        Z_star      = Z_star,       # raw metal mass fraction (divide by 0.0127 for Z/Zsun)
         Y_SZ_Mpc2   = Y_Mpc2,
         n_gas_Y     = n_gas_Y,
         n_gas_group = int(cat["n_gas"][group_id]),
