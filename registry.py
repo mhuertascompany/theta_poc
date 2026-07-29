@@ -20,10 +20,10 @@ _SNAP_Z0_SIMBA = 151   # SIMBA: 152 snapshots (0–151), z=0 → snap 151
 
 # Known z≈1 snapshot numbers (verify on cluster: header Time ≈ 0.500)
 # TNG:   snap 50,  a ≈ 0.5035 → z ≈ 0.986  (from IllustrisTNG data release)
-# EAGLE: snap 15,  a ≈ 0.4990 → z ≈ 1.004  (from EAGLE data release, Table A1)
-# SIMBA: no verified entry — pass --snap explicitly to obs_proxies.py
+# EAGLE: snap 19,  a ≈ 0.4985 → z ≈ 1.004  (EAGLE 29-snap sequence: 28=z0, 19=z1, 15=z2)
+# SIMBA: snap 105, a ≈ 0.5018 → z ≈ 0.993  (verified from cluster headers)
 _SNAP_Z1_TNG   = 50
-_SNAP_Z1_EAGLE = 15
+_SNAP_Z1_EAGLE = 19
 
 # Known z≈1 SIMBA snapshot (Simba25-1 / Simba50-1 / Simba100-1 share the same
 # output cadence). Verified from cluster headers:
