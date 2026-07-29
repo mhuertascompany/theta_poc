@@ -42,10 +42,10 @@ mpl.rcParams.update({
     "figure.dpi":      150,
 })
 
-SUITES  = ["TNG100-1", "Eagle100-1", "Simba25-1"]
-COLORS  = {"TNG100-1": "#1f77b4", "Eagle100-1": "#d62728", "Simba25-1": "#2ca02c"}
-LABELS  = {"TNG100-1": "TNG100",  "Eagle100-1": "EAGLE100", "Simba25-1": "SIMBA25"}
-LS      = {"TNG100-1": "-",       "Eagle100-1": "--",       "Simba25-1": "-."}
+SUITES  = ["TNG100-1", "Eagle100-1", "Simba100-1"]
+COLORS  = {"TNG100-1": "#1f77b4", "Eagle100-1": "#d62728", "Simba100-1": "#2ca02c"}
+LABELS  = {"TNG100-1": "TNG100",  "Eagle100-1": "EAGLE100", "Simba100-1": "SIMBA100"}
+LS      = {"TNG100-1": "-",       "Eagle100-1": "--",       "Simba100-1": "-."}
 
 _HERE   = pathlib.Path(__file__).resolve().parent
 TABLES  = _HERE / "tables" / "smf"
