@@ -1,0 +1,46 @@
+#!/bin/bash -l
+#
+# Observable proxies (r_half, Y_SZ) at fixed M_star, z~1 — one job per suite
+#
+#SBATCH -J OBS_PROXIES
+#SBATCH -o /u/mhuertas/python/theta_poc/logs/obs_proxies.%j.out
+#SBATCH -e /u/mhuertas/python/theta_poc/logs/obs_proxies.%j.err
+#SBATCH -D /u/mhuertas/python/theta_poc
+#SBATCH -p p.vera
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=32000MB
+#SBATCH --time=04:00:00
+
+module purge
+module load anaconda/3/2023.03
+
+source /u/mhuertas/python/envs/synth/bin/activate
+
+# Usage:
+#   sbatch obs_proxies.sb TNG100-1
+#   sbatch obs_proxies.sb Eagle100-1
+#   sbatch obs_proxies.sb Simba25-1 --snap <N>   # N from verified header Time≈0.500
+#   sbatch obs_proxies.sb TNG100-1  --max_gals 100   # smoke-test (~5 min)
+#
+# Snapshot lookup:
+#   TNG100-1   : snap 50 auto-resolved from registry  (z≈0.99, verify Time≈0.503)
+#   Eagle100-1 : snap 15 auto-resolved from registry  (z≈1.00, verify Time≈0.499)
+#   Simba25-1  : NOT in registry — find snap with:
+#     python3 -c "
+#     import h5py, glob
+#     for f in sorted(glob.glob('/virgotng/universe/Simba/Simba25-1/output/snapdir_*/snap_*.0.hdf5')):
+#         with h5py.File(f,'r') as g:
+#             a = float(g['Header'].attrs['Time'])
+#             if 0.48 < a < 0.52: print(f, 'a=', a)
+#     "
+#   Then pass --snap <N> and add the entry to registry.py _SIMBA_SNAP_MAP.
+
+if [ -z "$1" ]; then
+    echo "Error: provide a suite key."
+    echo "Usage: sbatch obs_proxies.sb <suite_key> [--snap N] [--max_gals N]"
+    exit 1
+fi
+
+echo "Starting obs_proxies for suite: $1  args: ${@:2}"
+python3 obs_proxies.py "$@"

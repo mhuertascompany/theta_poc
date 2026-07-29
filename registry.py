@@ -11,12 +11,29 @@ illustris_python basePath.
 """
 
 # ── z→snapnum maps ────────────────────────────────────────────────────────────
-# Only z=0 is needed for the PoC (config.py z_target=0.0).
-# Full maps to be verified from dataset headers on the cluster.
+# Verified from public data releases; confirm on cluster by checking
+# that header["Time"] (= scale factor a) matches 1/(1+z) for each entry.
 
 _SNAP_Z0_TNG   = 99    # TNG: 100 snapshots (0–99), z=0 → snap 99
 _SNAP_Z0_EAGLE = 28    # EAGLE: 29 snapshots (0–28), z=0 → snap 28
 _SNAP_Z0_SIMBA = 151   # SIMBA: 152 snapshots (0–151), z=0 → snap 151
+
+# Known z≈1 snapshot numbers (verify on cluster: header Time ≈ 0.500)
+# TNG:   snap 50,  a ≈ 0.5035 → z ≈ 0.986  (from IllustrisTNG data release)
+# EAGLE: snap 15,  a ≈ 0.4990 → z ≈ 1.004  (from EAGLE data release, Table A1)
+# SIMBA: no verified entry — pass --snap explicitly to obs_proxies.py
+_SNAP_Z1_TNG   = 50
+_SNAP_Z1_EAGLE = 15
+
+# Partial z→snap dicts (expand as needed for new analyses)
+_TNG_SNAP_MAP = {
+    0.0: _SNAP_Z0_TNG,
+    1.0: _SNAP_Z1_TNG,
+}
+_EAGLE_SNAP_MAP = {
+    0.0: _SNAP_Z0_EAGLE,
+    1.0: _SNAP_Z1_EAGLE,
+}
 
 # SIMBA Simba50-1 (L50n512FP): snapshot 126 is corrupt — never load it.
 _SIMBA_CORRUPT_SNAPS = {126}
@@ -30,27 +47,33 @@ def _camels_z_to_snap(z):
 
 
 def _tng_z_to_snap(z):
-    """Placeholder: full TNG z→snapnum map (100 entries). Verify on cluster."""
-    if z == 0.0:
-        return _SNAP_Z0_TNG
-    raise NotImplementedError(f"TNG snapnum for z={z} not yet mapped")
+    """TNG z→snapnum (partial map; expand _TNG_SNAP_MAP for new redshifts)."""
+    if z in _TNG_SNAP_MAP:
+        return _TNG_SNAP_MAP[z]
+    raise NotImplementedError(
+        f"TNG snapnum for z={z} not in map. "
+        f"Known: {_TNG_SNAP_MAP}. Verify on cluster and add entry.")
 
 
 def _eagle_z_to_snap(z):
-    """Placeholder: full EAGLE z→snapnum map (29 entries). Verify on cluster."""
-    if z == 0.0:
-        return _SNAP_Z0_EAGLE
-    raise NotImplementedError(f"EAGLE snapnum for z={z} not yet mapped")
+    """EAGLE z→snapnum (partial map; expand _EAGLE_SNAP_MAP for new redshifts)."""
+    if z in _EAGLE_SNAP_MAP:
+        return _EAGLE_SNAP_MAP[z]
+    raise NotImplementedError(
+        f"EAGLE snapnum for z={z} not in map. "
+        f"Known: {_EAGLE_SNAP_MAP}. Verify on cluster and add entry.")
 
 
 def _simba_z_to_snap(z, suite_key):
-    """Placeholder: full SIMBA z→snapnum map (152 entries). Verify on cluster."""
+    """SIMBA z→snapnum (only z=0 mapped; verify z≠0 from cluster headers)."""
     if z == 0.0:
         snap = _SNAP_Z0_SIMBA
         if suite_key == "Simba50-1" and snap in _SIMBA_CORRUPT_SNAPS:
             raise ValueError(f"Snapshot {snap} is corrupt for Simba50-1")
         return snap
-    raise NotImplementedError(f"SIMBA snapnum for z={z} not yet mapped")
+    raise NotImplementedError(
+        f"SIMBA snapnum for z={z} not yet mapped. "
+        "Find the snap where header['Time'] ≈ 0.500 and add to registry.")
 
 
 # ── suite definitions ─────────────────────────────────────────────────────────
