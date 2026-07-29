@@ -2,19 +2,21 @@
 fig_obs.py — Figure: 3D half-mass radius vs integrated Compton-Y at fixed M_star, z~1.
 
 Three suites (TNG100-1, Eagle100-1, Simba25-1) overlaid.
-Individual galaxies as scatter + per-suite median with 16th/84th error bars.
+Per-suite median with bootstrap 68% confidence intervals (2000 resamples).
+No individual scatter — the medians + CIs are the intended comparison.
 
 Intended divergence signal
 --------------------------
   SIMBA's kinetic AGN feedback evacuates CGM gas → lower Y_SZ at fixed M_star.
   TNG retains more CGM → higher Y_SZ.
-  Galaxy sizes (r_half) encode the wind-reinjection geometry differences.
+  Galaxy sizes (r_half) encode wind-reinjection geometry differences.
   The (Y_SZ, r_half) plane is a two-dimensional discriminator between models.
 
 Usage (runs locally on downloaded parquets)
 -------------------------------------------
     python fig_obs.py
     python fig_obs.py --tables_dir tables/obs --outdir figures
+    python fig_obs.py --n_boot 5000 --seed 7
 
 Input
 -----
@@ -53,21 +55,48 @@ COLORS  = {"TNG100-1": "#1f77b4", "Eagle100-1": "#d62728", "Simba25-1": "#2ca02c
 LABELS  = {"TNG100-1": "TNG100",  "Eagle100-1": "EAGLE100", "Simba25-1": "SIMBA25"}
 MARKERS = {"TNG100-1": "o",       "Eagle100-1": "s",        "Simba25-1": "^"}
 
-_HERE   = pathlib.Path(__file__).resolve().parent
-TABLES  = _HERE / "tables" / "obs"
-FIGURES = _HERE / "figures"
+_HERE       = pathlib.Path(__file__).resolve().parent
+TABLES      = _HERE / "tables" / "obs"
+FIGURES     = _HERE / "figures"
+MIN_N_GAS_Y = 10
 
-MIN_N_GAS_Y = 10    # minimum non-SF gas particles inside R_200c for Y_SZ to be reliable
 
+# ── bootstrap ─────────────────────────────────────────────────────────────────
+
+def bootstrap_median_ci(x, y, n_boot=2000, ci=68, rng=None):
+    """
+    Bootstrap 68% CI on the median of x and y independently.
+
+    Returns (x_med, x_lo, x_hi, y_med, y_lo, y_hi) where lo/hi are the
+    (50-ci/2)th and (50+ci/2)th percentiles of the bootstrap distribution
+    of medians.  Asymmetric because we work in linear space (log axes handled
+    by matplotlib).
+    """
+    if rng is None:
+        rng = np.random.default_rng(42)
+    n = len(x)
+    boot_x = np.empty(n_boot)
+    boot_y = np.empty(n_boot)
+    for i in range(n_boot):
+        idx = rng.integers(0, n, size=n)
+        boot_x[i] = np.median(x[idx])
+        boot_y[i] = np.median(y[idx])
+    lo_p = (100 - ci) / 2
+    hi_p = 100 - lo_p
+    x_lo, x_hi = np.percentile(boot_x, [lo_p, hi_p])
+    y_lo, y_hi = np.percentile(boot_y, [lo_p, hi_p])
+    return np.median(x), x_lo, x_hi, np.median(y), y_lo, y_hi
+
+
+# ── data loading ──────────────────────────────────────────────────────────────
 
 def load_suite(tables_dir, suite_key):
     """
-    Load and clean the most recent parquet for a suite.
+    Load and clean parquets for one suite.
 
-    Keeps only rows with:
-      - positive Y_SZ and r_half
-      - n_gas_Y >= MIN_N_GAS_Y  (enough particles for reliable Y_SZ)
-      - logM_star in the extraction range [10.5, 11.0]
+    Uses the snap-numbered parquet with the highest snap number if multiple
+    exist (i.e. a corrected re-run replaces an earlier wrong-snap file, as
+    long as the wrong-snap parquet has been deleted).
     """
     files = sorted(pathlib.Path(tables_dir).glob(f"{suite_key}_snap*.parquet"))
     if not files:
@@ -88,11 +117,13 @@ def load_suite(tables_dir, suite_key):
     return cleaned
 
 
-def make_figure(tables_dir, outdir):
+# ── figure ────────────────────────────────────────────────────────────────────
+
+def make_figure(tables_dir, outdir, n_boot=2000, seed=42):
     FIGURES.mkdir(parents=True, exist_ok=True)
+    rng = np.random.default_rng(seed)
 
-    fig, ax = plt.subplots(figsize=(6.5, 5.5))
-
+    fig, ax = plt.subplots(figsize=(6.0, 5.0))
     annotations = []
 
     for suite in SUITES:
@@ -103,29 +134,25 @@ def make_figure(tables_dir, outdir):
         z_val = float(df["z_actual"].median()) if "z_actual" in df.columns else float("nan")
         col   = COLORS[suite]
         mk    = MARKERS[suite]
+        N     = len(df)
 
         Y  = df["Y_SZ_Mpc2"].values
         rh = df["r_half_kpc"].values
 
-        # individual galaxies (rasterized; fine for dense suites)
-        ax.scatter(Y, rh,
-                   c=col, s=10, alpha=0.25, linewidths=0,
-                   rasterized=True, zorder=2)
-
-        # per-suite median + 16th/84th percentile bars
-        Y_med,  Y_lo,  Y_hi  = np.nanpercentile(Y,  [50, 16, 84])
-        rh_med, rh_lo, rh_hi = np.nanpercentile(rh, [50, 16, 84])
+        Y_med, Y_lo, Y_hi, rh_med, rh_lo, rh_hi = bootstrap_median_ci(
+            Y, rh, n_boot=n_boot, rng=rng)
 
         ax.errorbar(
             Y_med, rh_med,
             xerr=[[Y_med - Y_lo], [Y_hi - Y_med]],
             yerr=[[rh_med - rh_lo], [rh_hi - rh_med]],
-            fmt=mk, color=col, ms=10, markeredgecolor="k", markeredgewidth=0.6,
-            elinewidth=1.8, capsize=4, capthick=1.4,
+            fmt=mk, color=col,
+            ms=11, markeredgecolor="k", markeredgewidth=0.7,
+            elinewidth=2.0, capsize=5, capthick=1.6,
             zorder=5, label=LABELS[suite],
         )
 
-        annotations.append(f"{LABELS[suite]}: z={z_val:.2f}, N={len(df)}")
+        annotations.append(f"{LABELS[suite]}: z={z_val:.2f},  N={N}")
 
     ax.set_xscale("log")
     ax.set_yscale("log")
@@ -136,11 +163,11 @@ def make_figure(tables_dir, outdir):
         r"3D stellar half-mass radius  $r_{1/2}$  [kpc]",
         fontsize=12)
     ax.set_title(
-        r"$\log(M_\star/M_\odot) \in [10.5,\,11.0]$,  $z \approx 1$",
-        fontsize=11, pad=6)
+        r"$\log(M_\star/M_\odot) \in [10.5,\,11.0]$,  $z \approx 1$"
+        "\nMedians ± 68% bootstrap CI",
+        fontsize=10, pad=6)
     ax.legend(frameon=False, fontsize=10, loc="upper left")
 
-    # per-suite metadata annotation (bottom-right)
     for i, txt in enumerate(annotations):
         ax.annotate(
             txt,
@@ -160,14 +187,16 @@ def make_figure(tables_dir, outdir):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Fig: r_half vs Y_SZ at fixed M_star, z~1 (three suites)")
-    parser.add_argument("--tables_dir", default=str(TABLES),
-                        help="Directory containing obs_proxies parquets")
+        description="Fig: r_half vs Y_SZ at fixed M_star, z~1 (bootstrap medians)")
+    parser.add_argument("--tables_dir", default=str(TABLES))
     parser.add_argument("--outdir",     default=str(FIGURES))
+    parser.add_argument("--n_boot",     type=int, default=2000,
+                        help="Bootstrap resamples (default 2000)")
+    parser.add_argument("--seed",       type=int, default=42)
     args = parser.parse_args()
 
     print(f"Loading from: {args.tables_dir}")
-    make_figure(args.tables_dir, args.outdir)
+    make_figure(args.tables_dir, args.outdir, n_boot=args.n_boot, seed=args.seed)
 
 
 if __name__ == "__main__":
