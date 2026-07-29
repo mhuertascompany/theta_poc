@@ -25,6 +25,11 @@ _SNAP_Z0_SIMBA = 151   # SIMBA: 152 snapshots (0–151), z=0 → snap 151
 _SNAP_Z1_TNG   = 50
 _SNAP_Z1_EAGLE = 15
 
+# Known z≈1 SIMBA snapshot (Simba25-1 / Simba50-1 / Simba100-1 share the same
+# output cadence). Verified from cluster headers:
+#   snap 105: a = 0.50183 → z = 0.993
+_SNAP_Z1_SIMBA = 105
+
 # Partial z→snap dicts (expand as needed for new analyses)
 _TNG_SNAP_MAP = {
     0.0: _SNAP_Z0_TNG,
@@ -33,6 +38,10 @@ _TNG_SNAP_MAP = {
 _EAGLE_SNAP_MAP = {
     0.0: _SNAP_Z0_EAGLE,
     1.0: _SNAP_Z1_EAGLE,
+}
+_SIMBA_SNAP_MAP = {
+    0.0: _SNAP_Z0_SIMBA,
+    1.0: _SNAP_Z1_SIMBA,
 }
 
 # SIMBA Simba50-1 (L50n512FP): snapshot 126 is corrupt — never load it.
@@ -65,15 +74,16 @@ def _eagle_z_to_snap(z):
 
 
 def _simba_z_to_snap(z, suite_key):
-    """SIMBA z→snapnum (only z=0 mapped; verify z≠0 from cluster headers)."""
-    if z == 0.0:
-        snap = _SNAP_Z0_SIMBA
-        if suite_key == "Simba50-1" and snap in _SIMBA_CORRUPT_SNAPS:
-            raise ValueError(f"Snapshot {snap} is corrupt for Simba50-1")
+    """SIMBA z→snapnum (partial map; expand _SIMBA_SNAP_MAP for new redshifts)."""
+    if z in _SIMBA_SNAP_MAP:
+        snap = _SIMBA_SNAP_MAP[z]
+        corrupt = _SIMBA_CORRUPT_SNAPS if suite_key == "Simba50-1" else set()
+        if snap in corrupt:
+            raise ValueError(f"Snapshot {snap} is corrupt for {suite_key}")
         return snap
     raise NotImplementedError(
-        f"SIMBA snapnum for z={z} not yet mapped. "
-        "Find the snap where header['Time'] ≈ 0.500 and add to registry.")
+        f"SIMBA snapnum for z={z} not in map. "
+        f"Known: {_SIMBA_SNAP_MAP}. Verify on cluster and add entry.")
 
 
 # ── suite definitions ─────────────────────────────────────────────────────────
