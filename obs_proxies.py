@@ -41,8 +41,9 @@ Output
     tables/obs/{suite_key}_snap{snap:03d}_p{hash}.parquet
 
     Columns: suite, group_id, sub_id, snap, z_actual,
-             logM200c, logM_star, r_half_kpc, Y_SZ_Mpc2, n_gas_Y,
-             n_gas_group, r200c_kpc
+             logM200c, logM_star, r_half_kpc,
+             Z_star, Z_gas, Z_gas_sfr,
+             Y_SZ_Mpc2, n_gas_Y, n_gas_group, r200c_kpc
 """
 
 import sys
@@ -132,6 +133,8 @@ def load_obs_catalog(path, snap, h, a):
         "SubhaloPos", "SubhaloVel",
         "SubhaloMassType", "SubhaloHalfmassRadType",
         "SubhaloStarMetallicity",
+        "SubhaloGasMetallicity",
+        "SubhaloGasMetallicitySfr",   # SF-gas only — closest to nebular obs
     ])
 
     # GroupLenType: always a 2-D array (N_groups, 6) when multiple fields loaded
@@ -149,7 +152,12 @@ def load_obs_catalog(path, snap, h, a):
         r_half    = U.comoving_to_physical(
                         sub["SubhaloHalfmassRadType"][:, 4].astype(np.float64),
                         a, h),
-        Z_star    = sub["SubhaloStarMetallicity"].astype(np.float64),
+        Z_star      = sub["SubhaloStarMetallicity"].astype(np.float64),
+        Z_gas       = sub["SubhaloGasMetallicity"].astype(np.float64),
+        # SFR-weighted gas Z: closest to nebular-line obs; absent in some suites → NaN
+        Z_gas_sfr   = sub.get("SubhaloGasMetallicitySfr",
+                               np.full(len(sub["SubhaloGasMetallicity"]),
+                                       np.nan)).astype(np.float64),
         sub_pos   = U.comoving_to_physical(sub["SubhaloPos"], a, h),
         sub_vel   = sub["SubhaloVel"].astype(np.float64),
     )
@@ -197,12 +205,14 @@ def process_galaxy(group_id, path, snap, cat, h, a, box_ckpch, cfg):
     import selection as S
     il = _il()
 
-    fs      = int(cat["first_sub"][group_id])
-    r200c   = float(cat["r200c"][group_id])
-    m200c   = float(cat["m200c"][group_id])
-    m_star  = float(cat["m_star"][fs])
-    r_half  = float(cat["r_half"][fs])
-    Z_star  = float(cat["Z_star"][fs])
+    fs        = int(cat["first_sub"][group_id])
+    r200c     = float(cat["r200c"][group_id])
+    m200c     = float(cat["m200c"][group_id])
+    m_star    = float(cat["m_star"][fs])
+    r_half    = float(cat["r_half"][fs])
+    Z_star    = float(cat["Z_star"][fs])
+    Z_gas     = float(cat["Z_gas"][fs])
+    Z_gas_sfr = float(cat["Z_gas_sfr"][fs])
     sub_pos = cat["sub_pos"][fs]
     sub_vel = cat["sub_vel"][fs]
     box_kpc = U.comoving_to_physical(box_ckpch, a, h)
@@ -240,7 +250,9 @@ def process_galaxy(group_id, path, snap, cat, h, a, box_ckpch, cfg):
         logM200c    = float(np.log10(m200c)) if m200c > 0 else np.nan,
         logM_star   = float(np.log10(m_star)) if m_star > 0 else np.nan,
         r_half_kpc  = r_half,
-        Z_star      = Z_star,       # raw metal mass fraction (divide by 0.0127 for Z/Zsun)
+        Z_star      = Z_star,       # stellar metal mass fraction
+        Z_gas       = Z_gas,        # all-gas metal mass fraction (mass-weighted)
+        Z_gas_sfr   = Z_gas_sfr,    # SF-gas metal mass fraction; NaN if field absent
         Y_SZ_Mpc2   = Y_Mpc2,
         n_gas_Y     = n_gas_Y,
         n_gas_group = int(cat["n_gas"][group_id]),
